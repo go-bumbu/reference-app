@@ -123,6 +123,98 @@ func TestGetNotFound(t *testing.T) {
 	})
 }
 
+func TestUpdate(t *testing.T) {
+	forEachDB(t, func(t *testing.T, db *gorm.DB) {
+		ctx := context.Background()
+		svc := newService(t, db, Cfg{Now: fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))})
+		created, err := svc.Create(ctx, acme, Input{Title: "draft", Body: "old"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// another user of the tenant edits it: notes are shared
+		bob := Actor{TenantID: acme.TenantID, UserID: "user-bob"}
+		updated, err := svc.Update(ctx, bob, created.ID, Input{Title: "  final ", Body: "new"})
+		if err != nil {
+			t.Fatalf("update: %v", err)
+		}
+		want := created
+		want.Title, want.Body = "final", "new"
+		if updated != want {
+			t.Errorf("update: got %+v, want %+v (author and creation time unchanged)", updated, want)
+		}
+
+		got, err := svc.Get(ctx, acme, created.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got != want {
+			t.Errorf("get after update: got %+v, want %+v", got, want)
+		}
+
+		// the same values again still find the note
+		if _, err := svc.Update(ctx, acme, created.ID, Input{Title: "final", Body: "new"}); err != nil {
+			t.Errorf("unchanged update: %v", err)
+		}
+	})
+}
+
+func TestUpdateValidationAndNotFound(t *testing.T) {
+	forEachDB(t, func(t *testing.T, db *gorm.DB) {
+		ctx := context.Background()
+		svc := newService(t, db, Cfg{})
+		created, err := svc.Create(ctx, acme, Input{Title: "keep"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		_, err = svc.Update(ctx, acme, created.ID, Input{Title: "  "})
+		var verr *ValidationError
+		if !errors.As(err, &verr) || verr.Field != "title" {
+			t.Errorf("empty title: got %v, want a title *ValidationError", err)
+		}
+		if got, _ := svc.Get(ctx, acme, created.ID); got.Title != "keep" {
+			t.Errorf("an invalid update was stored: title %q", got.Title)
+		}
+
+		if _, err := svc.Update(ctx, acme, "missing", Input{Title: "x"}); !errors.Is(err, ErrNotFound) {
+			t.Errorf("missing note: got %v, want ErrNotFound", err)
+		}
+	})
+}
+
+func TestDelete(t *testing.T) {
+	forEachDB(t, func(t *testing.T, db *gorm.DB) {
+		ctx := context.Background()
+		svc := newService(t, db, Cfg{})
+		gone, err := svc.Create(ctx, acme, Input{Title: "gone"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		kept, err := svc.Create(ctx, acme, Input{Title: "kept"})
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := svc.Delete(ctx, acme, gone.ID); err != nil {
+			t.Fatalf("delete: %v", err)
+		}
+		if _, err := svc.Get(ctx, acme, gone.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("get after delete: got %v, want ErrNotFound", err)
+		}
+		if err := svc.Delete(ctx, acme, gone.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("second delete: got %v, want ErrNotFound", err)
+		}
+		list, err := svc.List(ctx, acme)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(list) != 1 || list[0].ID != kept.ID {
+			t.Errorf("list after delete: got %+v, want only %q", list, kept.ID)
+		}
+	})
+}
+
 func TestCreateValidation(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -226,6 +318,12 @@ func TestCancelledContext(t *testing.T) {
 		if _, err := svc.List(ctx, acme); !errors.Is(err, context.Canceled) {
 			t.Errorf("list: got %v, want context.Canceled", err)
 		}
+		if _, err := svc.Update(ctx, acme, "x", Input{Title: "x"}); !errors.Is(err, context.Canceled) {
+			t.Errorf("update: got %v, want context.Canceled", err)
+		}
+		if err := svc.Delete(ctx, acme, "x"); !errors.Is(err, context.Canceled) {
+			t.Errorf("delete: got %v, want context.Canceled", err)
+		}
 		if _, err := New(ctx, db, Cfg{}); err == nil {
 			t.Error("New: expected the migration to fail on a cancelled context")
 		}
@@ -262,6 +360,15 @@ func TestTenantIsolation(t *testing.T) {
 		if len(list) != 0 {
 			t.Errorf("another tenant lists %d notes, want 0", len(list))
 		}
+		if _, err := svc.Update(ctx, globex, created.ID, Input{Title: "hijacked"}); !errors.Is(err, ErrNotFound) {
+			t.Errorf("update from another tenant: got %v, want ErrNotFound", err)
+		}
+		if err := svc.Delete(ctx, globex, created.ID); !errors.Is(err, ErrNotFound) {
+			t.Errorf("delete from another tenant: got %v, want ErrNotFound", err)
+		}
+		if got, err := svc.Get(ctx, acme, created.ID); err != nil || got.Title != "acme only" {
+			t.Errorf("another tenant changed the note: got %+v, %v", got, err)
+		}
 
 		got, err := svc.Get(ctx, bob, created.ID)
 		if err != nil {
@@ -291,6 +398,12 @@ func TestNoTenantFailsClosed(t *testing.T) {
 		}
 		if _, err := svc.List(ctx, none); !errors.Is(err, ErrNoTenant) {
 			t.Errorf("list: got %v, want ErrNoTenant", err)
+		}
+		if _, err := svc.Update(ctx, none, "x", Input{Title: "x"}); !errors.Is(err, ErrNoTenant) {
+			t.Errorf("update: got %v, want ErrNoTenant", err)
+		}
+		if err := svc.Delete(ctx, none, "x"); !errors.Is(err, ErrNoTenant) {
+			t.Errorf("delete: got %v, want ErrNoTenant", err)
 		}
 	})
 }

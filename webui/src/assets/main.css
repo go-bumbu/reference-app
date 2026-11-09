@@ -7,12 +7,28 @@
     --app-border: var(--c-surface-200);
     --app-text-primary: var(--c-text-color);
     --app-text-muted: var(--c-text-muted-color);
+    --app-accent: var(--c-primary-color);
+    --app-accent-soft: color-mix(in srgb, var(--c-primary-color) 12%, transparent);
+    --app-hover: var(--c-surface-100);
+    --app-focus-ring: color-mix(in srgb, var(--c-primary-color) 30%, transparent);
+    --app-radius: 4px;
+    --app-radius-lg: 6px;
+    --app-danger: var(--c-red-500);
+    --app-shadow: 0 1px 2px rgb(24 32 43 / 0.06), 0 8px 24px rgb(24 32 43 / 0.08);
+
+    /* Shell geometry (App.vue): top bar over a sidebar and the content area. */
+    --app-topbar-height: 56px;
+    --app-sidebar-width: 288px;
+    --app-sidebar-collapsed-width: 60px;
+    --app-content-max-width: 72rem;
 }
 
 .dark-mode {
     --app-background: var(--c-surface-950);
     --app-panel: var(--c-surface-900);
     --app-border: var(--c-surface-700);
+    --app-hover: var(--c-surface-800);
+    --app-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 8px 24px rgb(0 0 0 / 0.36);
 }
 
 * {

@@ -58,6 +58,8 @@ func attachApiV0(r *mux.Router, notes handlers.NotesService, guard *authGuard, p
 	api("/notes").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(nh.List)))
 	api("/notes").Methods(http.MethodPost).Handler(guard.protect(http.HandlerFunc(nh.Create)))
 	api("/notes/{noteId}").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(nh.Get)))
+	api("/notes/{noteId}").Methods(http.MethodPut).Handler(guard.protect(http.HandlerFunc(nh.Update)))
+	api("/notes/{noteId}").Methods(http.MethodDelete).Handler(guard.protect(http.HandlerFunc(nh.Delete)))
 }
 
 // isAPIPath reports whether the request targets the API.

@@ -63,6 +63,37 @@ func TestClientAgainstRouter(t *testing.T) {
 		t.Errorf("list: got %+v", list)
 	}
 
+	// another user of the tenant edits the note: notes are shared
+	bob := as("acme", "bob")
+	updated, err := bob.UpdateNote(ctx, created.ID, client.NoteInput{Title: "plan v2", Body: "more"})
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	want := created
+	want.Title, want.Body = "plan v2", "more"
+	if updated != want {
+		t.Errorf("update: got %+v, want %+v", updated, want)
+	}
+	if _, err := as("globex", "carol").UpdateNote(ctx, created.ID, client.NoteInput{Title: "x"}); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("update another tenant's note: got %v, want ErrNotFound", err)
+	}
+	if err := as("globex", "carol").DeleteNote(ctx, created.ID); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("delete another tenant's note: got %v, want ErrNotFound", err)
+	}
+	if err := bob.DeleteNote(ctx, created.ID); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if _, err := alice.GetNote(ctx, created.ID); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("get after delete: got %v, want ErrNotFound", err)
+	}
+	if _, err := alice.UpdateNote(ctx, created.ID, client.NoteInput{Title: "x"}); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("update after delete: got %v, want ErrNotFound", err)
+	}
+	created, err = alice.CreateNote(ctx, client.NoteInput{Title: "plan", Body: "text"})
+	if err != nil {
+		t.Fatalf("create again: %v", err)
+	}
+
 	// the problem responses map onto the client's errors
 	_, err = alice.CreateNote(ctx, client.NoteInput{Title: "  "})
 	var p *client.Problem

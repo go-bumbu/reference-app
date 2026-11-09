@@ -50,7 +50,17 @@ ui-test: ## run the web UI type check and unit tests (needs node)
 	@cd webui && npm test
 
 .PHONY: verify
-verify: test license-check lint benchmark coverage ui-test ## run all tests
+verify: ## run all checks; runs every check and fails if any fail
+	@fail=0; \
+	for target in test license-check lint benchmark coverage spec-lint ui-test; do \
+		echo "==================== make $$target ===================="; \
+		$(MAKE) --no-print-directory $$target || fail=1; \
+	done; \
+	if [ $$fail -ne 0 ]; then \
+		echo "❌ verify failed (see above)"; \
+		exit 1; \
+	fi; \
+	echo "✅ verify passed"
 
 cover-report: ## generate a coverage report
 	go test -covermode=count -coverpkg=./... -coverprofile cover.out  ./...

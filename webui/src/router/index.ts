@@ -14,6 +14,29 @@ const router = createRouter({
             props: true
         },
         {
+            // The settings chrome is drawn once, around each settings page.
+            path: '/settings',
+            component: () => import('@/views/settings/SettingsShell.vue'),
+            children: [
+                { path: '', name: 'settings', redirect: { name: 'settings-appearance' } },
+                {
+                    path: 'appearance',
+                    name: 'settings-appearance',
+                    component: () => import('@/views/settings/AppearanceView.vue')
+                },
+                {
+                    path: 'jobs',
+                    name: 'settings-jobs',
+                    component: () => import('@/views/settings/JobsView.vue')
+                },
+                {
+                    path: 'about',
+                    name: 'settings-about',
+                    component: () => import('@/views/settings/AboutView.vue')
+                }
+            ]
+        },
+        {
             path: '/:pathMatch(.*)*',
             name: 'not-found',
             component: () => import('@/views/NotFoundView.vue')

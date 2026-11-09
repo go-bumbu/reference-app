@@ -151,6 +151,19 @@ func (c *Client) CreateNote(ctx context.Context, in NoteInput) (Note, error) {
 	return out, err
 }
 
+// UpdateNote replaces the title and body of a note of the caller's tenant;
+// a missing note is ErrNotFound, input breaking a rule is ErrValidation.
+func (c *Client) UpdateNote(ctx context.Context, id string, in NoteInput) (Note, error) {
+	var out Note
+	err := c.do(ctx, http.MethodPut, "/notes/"+url.PathEscape(id), in, http.StatusOK, &out)
+	return out, err
+}
+
+// DeleteNote deletes a note of the caller's tenant; a missing note is ErrNotFound.
+func (c *Client) DeleteNote(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, "/notes/"+url.PathEscape(id), nil, http.StatusNoContent, nil)
+}
+
 // do sends the request and decodes a wantStatus response into out; any other
 // status becomes a *Problem. path must already be escaped.
 func (c *Client) do(ctx context.Context, method, path string, body any, wantStatus int, out any) error {
@@ -186,6 +199,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, wantStat
 
 	if resp.StatusCode != wantStatus {
 		return newProblem(resp, data)
+	}
+	if out == nil { // a response without a body, e.g. 204
+		return nil
 	}
 	if err := json.Unmarshal(data, out); err != nil {
 		return fmt.Errorf("client: %s %s: decode response: %w", method, path, err)

@@ -76,6 +76,44 @@ func (s *store) get(ctx context.Context, tenantID, id string) (Note, error) {
 	return row.toNote(), nil
 }
 
+// update sets the title and body of the note with the id, only if it belongs
+// to the tenant, and returns it as stored. The write and the read back share a
+// transaction, so the note returned is the one this call wrote.
+func (s *store) update(ctx context.Context, tenantID, id string, in Input) (Note, error) {
+	var row noteRow
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&noteRow{}).
+			Where("tenant_id = ? AND id = ?", tenantID, id).
+			Updates(map[string]any{"title": in.Title, "body": in.Body})
+		if res.Error != nil {
+			return fmt.Errorf("update note: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if err := tx.Where("tenant_id = ? AND id = ?", tenantID, id).Take(&row).Error; err != nil {
+			return fmt.Errorf("select updated note: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return Note{}, err
+	}
+	return row.toNote(), nil
+}
+
+// delete removes the note with the id, only if it belongs to the tenant.
+func (s *store) delete(ctx context.Context, tenantID, id string) error {
+	res := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&noteRow{})
+	if res.Error != nil {
+		return fmt.Errorf("delete note: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // list returns the tenant's notes, newest first; the id breaks ties so the
 // order is stable.
 func (s *store) list(ctx context.Context, tenantID string) ([]Note, error) {

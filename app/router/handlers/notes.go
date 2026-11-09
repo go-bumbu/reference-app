@@ -19,6 +19,8 @@ type NotesService interface {
 	List(ctx context.Context, a notes.Actor) ([]notes.Note, error)
 	Get(ctx context.Context, a notes.Actor, id string) (notes.Note, error)
 	Create(ctx context.Context, a notes.Actor, in notes.Input) (notes.Note, error)
+	Update(ctx context.Context, a notes.Actor, id string, in notes.Input) (notes.Note, error)
+	Delete(ctx context.Context, a notes.Actor, id string) error
 }
 
 // NotesHandler translates the /notes HTTP API into calls to the notes module.
@@ -46,7 +48,7 @@ type noteListResponse struct {
 	Items []noteResponse `json:"items"`
 }
 
-// noteRequest is the body of POST /notes (schema NoteInput).
+// noteRequest is the body of POST /notes and PUT /notes/{noteId} (schema NoteInput).
 type noteRequest struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
@@ -95,11 +97,7 @@ func (h *NotesHandler) Get(w http.ResponseWriter, r *http.Request) {
 	id := mux.Vars(r)["noteId"]
 	n, err := h.Notes.Get(r.Context(), a, id)
 	if err != nil {
-		if errors.Is(err, notes.ErrNotFound) {
-			h.Problems.Write(w, r, http.StatusNotFound, problemjson.SlugNotFound, "note "+id+" not found")
-			return
-		}
-		h.internalError(w, r, err)
+		h.writeError(w, r, id, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, toNoteResponse(n))
@@ -119,17 +117,63 @@ func (h *NotesHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := h.Notes.Create(r.Context(), a, notes.Input{Title: req.Title, Body: req.Body})
 	if err != nil {
-		var verr *notes.ValidationError
-		if errors.As(err, &verr) {
-			h.Problems.WriteValidation(w, r, verr.Error(),
-				problemjson.FieldError{Pointer: "/" + verr.Field, Detail: verr.Msg})
-			return
-		}
-		h.internalError(w, r, err)
+		h.writeError(w, r, "", err)
 		return
 	}
 	w.Header().Set("Location", r.URL.Path+"/"+n.ID)
 	writeJSON(w, http.StatusCreated, toNoteResponse(n))
+}
+
+// Update handles PUT /notes/{noteId}.
+func (h *NotesHandler) Update(w http.ResponseWriter, r *http.Request) {
+	a, ok := actor(r)
+	if !ok {
+		h.internalError(w, r, errNoIdentity)
+		return
+	}
+	var req noteRequest
+	if err := decodeJSON(w, r, &req); err != nil {
+		h.Problems.Write(w, r, http.StatusBadRequest, SlugBadRequest, err.Error())
+		return
+	}
+	id := mux.Vars(r)["noteId"]
+	n, err := h.Notes.Update(r.Context(), a, id, notes.Input{Title: req.Title, Body: req.Body})
+	if err != nil {
+		h.writeError(w, r, id, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toNoteResponse(n))
+}
+
+// Delete handles DELETE /notes/{noteId}.
+func (h *NotesHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	a, ok := actor(r)
+	if !ok {
+		h.internalError(w, r, errNoIdentity)
+		return
+	}
+	id := mux.Vars(r)["noteId"]
+	if err := h.Notes.Delete(r.Context(), a, id); err != nil {
+		h.writeError(w, r, id, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeError maps a module error onto its problem: ErrNotFound is 404 for the
+// note id, a *ValidationError is 422 with the field's pointer, anything else
+// is a logged 500.
+func (h *NotesHandler) writeError(w http.ResponseWriter, r *http.Request, id string, err error) {
+	var verr *notes.ValidationError
+	switch {
+	case errors.Is(err, notes.ErrNotFound):
+		h.Problems.Write(w, r, http.StatusNotFound, problemjson.SlugNotFound, "note "+id+" not found")
+	case errors.As(err, &verr):
+		h.Problems.WriteValidation(w, r, verr.Error(),
+			problemjson.FieldError{Pointer: "/" + verr.Field, Detail: verr.Msg})
+	default:
+		h.internalError(w, r, err)
+	}
 }
 
 // internalError logs the real error and answers with a generic 500: internal
