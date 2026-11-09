@@ -1,44 +1,29 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import Button from 'primevue/button'
-import InputText from 'primevue/inputtext'
+import { computed } from 'vue'
 import Message from 'primevue/message'
-import Textarea from 'primevue/textarea'
-import { useToast } from 'primevue/usetoast'
-import { useCreateNote, useMe, useNotes } from '@/composables/useApi'
-import { apiErrorMessage, apiErrorStatus, fieldErrors } from '@/lib/apiError'
+import { useRoute } from 'vue-router'
+import { useMe, useNotes } from '@/composables/useApi'
+import { apiErrorMessage } from '@/lib/apiError'
 import { formatDate } from '@/lib/format'
 
-const toast = useToast()
+// The notes as a card grid. Creating one is the top bar's Add note
+// (NoteDialog), so this page only shows them.
+const route = useRoute()
 const { data: me } = useMe()
 const { data: notes, isPending, error } = useNotes()
-const create = useCreateNote()
 
-const title = ref('')
-const body = ref('')
-
-// Field messages come from the server's 422 (the module owns validation);
-// anything else is a toast.
-const errors = computed(() =>
-    apiErrorStatus(create.error.value) === 422 ? fieldErrors(create.error.value) : {}
+// The top bar's search (`?q=`) filters the list on the client: the API returns
+// every note of the tenant in one page, so there is nothing to ask the server.
+const query = computed(() =>
+    typeof route.query.q === 'string' ? route.query.q.trim().toLowerCase() : ''
 )
-
-function submit() {
-    create.mutate(
-        { title: title.value, body: body.value },
-        {
-            onSuccess: () => {
-                title.value = ''
-                body.value = ''
-            },
-            onError: (err) => {
-                if (apiErrorStatus(err) !== 422) {
-                    toast.add({ severity: 'error', summary: apiErrorMessage(err), life: 5000 })
-                }
-            }
-        }
+const shown = computed(() => {
+    const q = query.value
+    if (!q) return notes.value ?? []
+    return (notes.value ?? []).filter(
+        (n) => n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q)
     )
-}
+})
 
 function author(createdBy: string): string {
     return createdBy === me.value?.userId ? 'you' : 'another member'
@@ -46,101 +31,86 @@ function author(createdBy: string): string {
 </script>
 
 <template>
-    <section class="create">
-        <h1>Notes</h1>
-        <p class="muted">Notes are shared with everyone in your tenant.</p>
-        <form class="form" @submit.prevent="submit">
-            <label for="note-title">Title</label>
-            <InputText
-                id="note-title"
-                v-model="title"
-                :invalid="!!errors.title"
-                maxlength="200"
-                data-test="title"
-            />
-            <small v-if="errors.title" class="error" data-test="title-error">{{
-                errors.title
-            }}</small>
-
-            <label for="note-body">Body</label>
-            <Textarea id="note-body" v-model="body" :invalid="!!errors.body" rows="3" autoResize />
-            <small v-if="errors.body" class="error">{{ errors.body }}</small>
-
-            <Button
-                type="submit"
-                label="Add note"
-                :loading="create.isPending.value"
-                class="submit"
-                data-test="submit"
-            />
-        </form>
-    </section>
-
-    <section>
-        <p v-if="isPending" class="muted">Loading…</p>
-        <Message v-else-if="error" severity="error">{{ apiErrorMessage(error) }}</Message>
-        <p v-else-if="!notes?.length" class="muted" data-test="empty">No notes yet.</p>
-        <ul v-else class="list">
-            <li v-for="note in notes" :key="note.id" class="item" data-test="note">
-                <RouterLink :to="{ name: 'note', params: { id: note.id } }" class="title">
-                    {{ note.title }}
-                </RouterLink>
-                <p v-if="note.body" class="body">{{ note.body }}</p>
-                <small class="muted"
+    <p v-if="isPending" class="muted">Loading…</p>
+    <Message v-else-if="error" severity="error">{{ apiErrorMessage(error) }}</Message>
+    <p v-else-if="!notes?.length" class="muted" data-test="empty">
+        No notes yet. Use <strong>Add note</strong> in the top bar to write the first one.
+    </p>
+    <p v-else-if="!shown.length" class="muted" data-test="no-match">
+        No notes match “{{ route.query.q }}”.
+    </p>
+    <ul v-else class="grid">
+        <li v-for="note in shown" :key="note.id" data-test="note">
+            <RouterLink :to="{ name: 'note', params: { id: note.id } }" class="card">
+                <h2 class="card-title">{{ note.title }}</h2>
+                <p v-if="note.body" class="card-body">{{ note.body }}</p>
+                <small class="card-meta muted"
                     >by {{ author(note.createdBy) }}, {{ formatDate(note.createdAt) }}</small
                 >
-            </li>
-        </ul>
-    </section>
+            </RouterLink>
+        </li>
+    </ul>
 </template>
 
 <style scoped>
-h1 {
-    margin: 0 0 0.25rem;
-}
-
-.form {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    margin: 1rem 0 2rem;
-}
-
-.submit {
-    align-self: flex-start;
-    margin-top: 0.5rem;
-}
-
-.error {
-    color: var(--c-red-500);
-}
-
-.list {
-    list-style: none;
-    padding: 0;
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 1rem;
     margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
+    padding: 0;
+    list-style: none;
 }
 
-.item {
-    padding: 0.75rem 1rem;
+/* The whole card is the link to the note's page. */
+.card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    height: 100%;
+    min-height: 9rem;
+    padding: 1rem 1.1rem;
     background: var(--app-panel);
     border: 1px solid var(--app-border);
     border-radius: 0.5rem;
+    color: var(--app-text-primary);
+    text-decoration: none;
+    transition:
+        border-color 0.15s,
+        box-shadow 0.15s,
+        transform 0.15s;
+}
+.card:hover {
+    border-color: var(--app-accent);
+    box-shadow: 0 4px 14px rgb(0 0 0 / 0.08);
+    transform: translateY(-1px);
+}
+.card:focus-visible {
+    outline: 2px solid var(--app-focus-ring);
+    outline-offset: 2px;
 }
 
-.title {
+.card-title {
+    margin: 0;
+    font-size: 1rem;
     font-weight: 600;
+    overflow-wrap: anywhere;
 }
 
-.body {
-    margin: 0.35rem 0;
+.card-body {
+    flex: 1;
+    margin: 0;
+    font-size: 0.9rem;
     white-space: pre-wrap;
     overflow: hidden;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 5;
     -webkit-box-orient: vertical;
+}
+
+/* Pinned to the card's foot, whatever the body's length. */
+.card-meta {
+    margin-top: auto;
+    font-size: 0.75rem;
 }
 </style>

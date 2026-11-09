@@ -26,13 +26,14 @@ Open <http://localhost:8081>; the sample config signs every request in as `admin
 
 ## Documentation
 
-- [What's included](docs/whats-included.md)
-- [Folder structure](docs/folder-structure.md)
-- [API](docs/api.md) and its [OpenAPI spec](docs/openapi/api-v0.yaml)
-- [Authentication and tenancy](docs/auth-and-tenancy.md)
-- [Database](docs/database.md)
-- [Web UI](docs/web-ui.md)
-- [Server lifecycle](docs/server-lifecycle.md)
+- [Build a new app from this reference](docs/reference/README.md): step-by-step guides for reusing each part
+- [Architecture](docs/agents/architecture.md): folder tiers, design decisions, and links to every topic doc
+- [Features](docs/agents/features.md): what is implemented, partial, or deliberately left out
+- [API](docs/agents/api.md) and its [OpenAPI spec](docs/openapi/api-v0.yaml)
+- [Authentication and tenancy](docs/agents/auth-and-tenancy.md)
+- [Database](docs/agents/database.md)
+- [Web UI](docs/agents/web-ui.md)
+- [Server lifecycle](docs/agents/server-lifecycle.md)
 
 ## Development
 

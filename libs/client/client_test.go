@@ -39,7 +39,11 @@ func (f *fakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusCreated, `{"id":"n2","createdBy":"u1","title":"new","body":"text","createdAt":"2026-01-02T03:04:05Z"}`)
 	case "GET /base/api/v0/notes/n1":
 		writeJSON(w, http.StatusOK, `{"id":"n1","createdBy":"u1","title":"hi","body":"","createdAt":"2026-01-02T03:04:05Z"}`)
-	case "GET /base/api/v0/notes/a%2Fb":
+	case "PUT /base/api/v0/notes/n1":
+		writeJSON(w, http.StatusOK, `{"id":"n1","createdBy":"u1","title":"edited","body":"more","createdAt":"2026-01-02T03:04:05Z"}`)
+	case "DELETE /base/api/v0/notes/n1":
+		w.WriteHeader(http.StatusNoContent)
+	case "GET /base/api/v0/notes/a%2Fb", "DELETE /base/api/v0/notes/a%2Fb":
 		writeProblem(w, http.StatusNotFound, "not_found", "note a/b not found")
 	case "GET /base/api/v0/notes/bad":
 		w.Header().Set("Content-Type", "application/problem+json")
@@ -161,6 +165,24 @@ func TestNotes(t *testing.T) {
 	}
 	if fake.body != `{"title":"new","body":"text"}` {
 		t.Errorf("create body: got %s", fake.body)
+	}
+
+	n, err = c.UpdateNote(ctx, "n1", NoteInput{Title: "edited", Body: "more"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.ID != "n1" || n.Title != "edited" {
+		t.Errorf("update: got %+v", n)
+	}
+	if fake.body != `{"title":"edited","body":"more"}` {
+		t.Errorf("update body: got %s", fake.body)
+	}
+
+	if err := c.DeleteNote(ctx, "n1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if err := c.DeleteNote(ctx, "a/b"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete missing: got %v, want ErrNotFound", err)
 	}
 }
 

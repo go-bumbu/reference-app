@@ -16,11 +16,11 @@ import (
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/go-bumbu/db/gormdb/gormdbtest"
+	"github.com/go-bumbu/db/gormdb/sqlite"
 	"github.com/go-bumbu/reference-app/internal/notes"
 	"github.com/go-bumbu/reference-app/internal/tenants"
-	"github.com/go-bumbu/reference-app/libs/gormdb"
 	"github.com/gorilla/mux"
-	gormlogger "gorm.io/gorm/logger"
 )
 
 // These tests keep docs/openapi/api-v0.yaml and the router honest with each other:
@@ -65,15 +65,9 @@ type testDeps struct {
 
 func newDeps(t *testing.T) testDeps {
 	t.Helper()
-	db, err := gormdb.Open(gormdb.Cfg{
-		Driver: gormdb.DriverSqlite,
-		Sqlite: gormdb.SqliteCfg{Path: filepath.Join(t.TempDir(), "app.db")},
-		Logger: gormlogger.Discard, // a miss is a normal outcome here, not log noise
-	})
-	if err != nil {
-		t.Fatalf("open db: %v", err)
-	}
-	t.Cleanup(func() { _ = gormdb.Close(db) })
+	// closed by the helper when the test ends; GORM's logger is discarded, as a
+	// miss is a normal outcome here, not log noise
+	db := gormdbtest.Sqlite(t, sqlite.Driver{})
 	notesSvc, err := notes.New(context.Background(), db, notes.Cfg{})
 	if err != nil {
 		t.Fatalf("notes.New: %v", err)
@@ -183,6 +177,10 @@ func TestOpenAPIResponseContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			doomed, err := deps.notes.Create(context.Background(), admin, notes.Input{Title: "doomed"})
+			if err != nil {
+				t.Fatal(err)
+			}
 			r := newTestRouter(t, deps, production, AuthCfg{Method: AuthNone})
 
 			cases := []contractCase{
@@ -204,6 +202,22 @@ func TestOpenAPIResponseContract(t *testing.T) {
 				{name: "get missing note", method: http.MethodGet, path: "/notes/missing", specPath: "/notes/{noteId}",
 					wantStatus: http.StatusNotFound},
 				{name: "get note of another tenant", method: http.MethodGet, path: "/notes/" + foreign.ID,
+					specPath: "/notes/{noteId}", wantStatus: http.StatusNotFound},
+				{name: "update note", method: http.MethodPut, path: "/notes/" + existing.ID, specPath: "/notes/{noteId}",
+					body: `{"title":"edited","body":"new text"}`, wantStatus: http.StatusOK},
+				{name: "update note malformed json", method: http.MethodPut, path: "/notes/" + existing.ID,
+					specPath: "/notes/{noteId}", body: `{"title":`, wantStatus: http.StatusBadRequest},
+				{name: "update note empty title", method: http.MethodPut, path: "/notes/" + existing.ID,
+					specPath: "/notes/{noteId}", body: `{"title":"  "}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "update missing note", method: http.MethodPut, path: "/notes/missing", specPath: "/notes/{noteId}",
+					body: `{"title":"x"}`, wantStatus: http.StatusNotFound},
+				{name: "update note of another tenant", method: http.MethodPut, path: "/notes/" + foreign.ID,
+					specPath: "/notes/{noteId}", body: `{"title":"x"}`, wantStatus: http.StatusNotFound},
+				{name: "delete note", method: http.MethodDelete, path: "/notes/" + doomed.ID, specPath: "/notes/{noteId}",
+					wantStatus: http.StatusNoContent},
+				{name: "delete missing note", method: http.MethodDelete, path: "/notes/missing",
+					specPath: "/notes/{noteId}", wantStatus: http.StatusNotFound},
+				{name: "delete note of another tenant", method: http.MethodDelete, path: "/notes/" + foreign.ID,
 					specPath: "/notes/{noteId}", wantStatus: http.StatusNotFound},
 			}
 			for _, tc := range cases {
@@ -287,6 +301,13 @@ func validateResponse(t *testing.T, doc *openapi3.T, method, specPath string, re
 	if resp == nil || resp.Value == nil {
 		t.Fatalf("spec does not document status %d for %s %s", rec.Code, method, specPath)
 	}
+	// a response documented without content (204) must come without a body
+	if len(resp.Value.Content) == 0 {
+		if rec.Body.Len() != 0 {
+			t.Errorf("%d %s %s: spec documents no body, got %q", rec.Code, method, specPath, rec.Body.String())
+		}
+		return
+	}
 	ct := rec.Header().Get("Content-Type")
 	media := resp.Value.Content.Get(ct)
 	if media == nil || media.Schema == nil {
@@ -313,6 +334,8 @@ func TestOpenAPIUnauthorizedContract(t *testing.T) {
 		{method: http.MethodGet, path: "/notes", specPath: "/notes"},
 		{method: http.MethodPost, path: "/notes", specPath: "/notes", body: `{"title":"x"}`},
 		{method: http.MethodGet, path: "/notes/x", specPath: "/notes/{noteId}"},
+		{method: http.MethodPut, path: "/notes/x", specPath: "/notes/{noteId}", body: `{"title":"x"}`},
+		{method: http.MethodDelete, path: "/notes/x", specPath: "/notes/{noteId}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -337,6 +360,14 @@ func (failingNotes) Get(context.Context, notes.Actor, string) (notes.Note, error
 
 func (failingNotes) Create(context.Context, notes.Actor, notes.Input) (notes.Note, error) {
 	return notes.Note{}, errors.New("db down")
+}
+
+func (failingNotes) Update(context.Context, notes.Actor, string, notes.Input) (notes.Note, error) {
+	return notes.Note{}, errors.New("db down")
+}
+
+func (failingNotes) Delete(context.Context, notes.Actor, string) error {
+	return errors.New("db down")
 }
 
 // fixedTenants resolves every identity to the same principal, without a db.

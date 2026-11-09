@@ -144,6 +144,30 @@ func (s *Service) Get(ctx context.Context, a Actor, id string) (Note, error) {
 	return s.store.get(ctx, a.TenantID, id)
 }
 
+// Update replaces the title and body of the note with the given id in the
+// actor's tenant and returns the updated note, or ErrNotFound. Any user of the
+// tenant may edit any of its notes: notes are shared, and the author and
+// creation time stay as they were.
+func (s *Service) Update(ctx context.Context, a Actor, id string, in Input) (Note, error) {
+	if a.TenantID == "" {
+		return Note{}, ErrNoTenant
+	}
+	in.Title = strings.TrimSpace(in.Title)
+	if err := validate(in); err != nil {
+		return Note{}, err
+	}
+	return s.store.update(ctx, a.TenantID, id, in)
+}
+
+// Delete removes the note with the given id from the actor's tenant, or
+// returns ErrNotFound. Like Update, any user of the tenant may delete it.
+func (s *Service) Delete(ctx context.Context, a Actor, id string) error {
+	if a.TenantID == "" {
+		return ErrNoTenant
+	}
+	return s.store.delete(ctx, a.TenantID, id)
+}
+
 // List returns the notes of the actor's tenant, newest first.
 func (s *Service) List(ctx context.Context, a Actor) ([]Note, error) {
 	if a.TenantID == "" {

@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/go-bumbu/config"
+	"github.com/go-bumbu/db/gormdb"
 	"github.com/go-bumbu/reference-app/app/router"
-	"github.com/go-bumbu/reference-app/libs/gormdb"
 )
 
 type AppCfg struct {

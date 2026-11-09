@@ -1,6 +1,14 @@
 import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { createNote, getInfo, getMe, getNote, listNotes } from '@/lib/api/api'
+import {
+    createNote,
+    deleteNote,
+    getInfo,
+    getMe,
+    getNote,
+    listNotes,
+    updateNote
+} from '@/lib/api/api'
 import type { NoteInput } from '@/lib/api/types'
 
 // Query keys in one place, so a mutation invalidates exactly what it changed.
@@ -38,6 +46,28 @@ export function useCreateNote() {
         mutationFn: (input: NoteInput) => createNote(input),
         onSuccess: (note) => {
             qc.setQueryData(queryKeys.note(note.id), note)
+            return qc.invalidateQueries({ queryKey: queryKeys.notes, exact: true })
+        }
+    })
+}
+
+export function useUpdateNote() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: ({ id, input }: { id: string; input: NoteInput }) => updateNote(id, input),
+        onSuccess: (note) => {
+            qc.setQueryData(queryKeys.note(note.id), note)
+            return qc.invalidateQueries({ queryKey: queryKeys.notes, exact: true })
+        }
+    })
+}
+
+export function useDeleteNote() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: (id: string) => deleteNote(id),
+        onSuccess: (_data, id) => {
+            qc.removeQueries({ queryKey: queryKeys.note(id), exact: true })
             return qc.invalidateQueries({ queryKey: queryKeys.notes, exact: true })
         }
     })

@@ -29,38 +29,32 @@ describe('NotesView', () => {
         expect(items[1].text()).toContain('by another member')
     })
 
+    it('filters the list by the search query in the URL', async () => {
+        vi.mocked(api.listNotes).mockResolvedValue([
+            { ...note('n1', 'u1'), title: 'Buy milk' },
+            { ...note('n2', 'u1'), title: 'Call Bob', body: 'about the MILK order' },
+            { ...note('n3', 'u1'), title: 'Read a book' }
+        ])
+        const w = await mountWithApp(NotesView)
+        await w.vm.$router.push('/?q=milk')
+        await flushPromises()
+        expect(w.findAll('[data-test="note"]')).toHaveLength(2)
+
+        await w.vm.$router.push('/?q=nothing')
+        await flushPromises()
+        expect(w.find('[data-test="no-match"]').exists()).toBe(true)
+    })
+
     it('shows the empty state', async () => {
         vi.mocked(api.listNotes).mockResolvedValue([])
         const w = await mountWithApp(NotesView)
         expect(w.find('[data-test="empty"]').exists()).toBe(true)
     })
 
-    it('creates a note, clears the form and refreshes the list', async () => {
-        vi.mocked(api.listNotes)
-            .mockResolvedValueOnce([])
-            .mockResolvedValue([note('n1', 'u1')])
-        vi.mocked(api.createNote).mockResolvedValue(note('n1', 'u1'))
+    it('shows an error when the list fails', async () => {
+        vi.mocked(api.listNotes).mockRejectedValue(problem(500, { detail: 'boom' }))
         const w = await mountWithApp(NotesView)
-
-        await w.find('[data-test="title"]').setValue('hello')
-        await w.find('form').trigger('submit')
-        await flushPromises()
-
-        expect(api.createNote).toHaveBeenCalledWith({ title: 'hello', body: '' })
-        expect((w.find('[data-test="title"]').element as HTMLInputElement).value).toBe('')
-        expect(w.findAll('[data-test="note"]')).toHaveLength(1)
-    })
-
-    it('shows the server validation error on the field', async () => {
-        vi.mocked(api.listNotes).mockResolvedValue([])
-        vi.mocked(api.createNote).mockRejectedValue(
-            problem(422, { errors: [{ pointer: '/title', detail: 'must not be empty' }] })
-        )
-        const w = await mountWithApp(NotesView)
-
-        await w.find('form').trigger('submit')
-        await flushPromises()
-
-        expect(w.find('[data-test="title-error"]').text()).toBe('must not be empty')
+        expect(w.find('[data-test="note"]').exists()).toBe(false)
+        expect(w.find('[data-test="empty"]').exists()).toBe(false)
     })
 })

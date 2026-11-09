@@ -8,13 +8,15 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/go-bumbu/db/gormdb"
+	"github.com/go-bumbu/db/gormdb/postgres"
+	"github.com/go-bumbu/db/gormdb/sqlite"
 	"github.com/go-bumbu/reference-app/app/logger"
 	"github.com/go-bumbu/reference-app/app/metainfo"
 	"github.com/go-bumbu/reference-app/app/router"
 	"github.com/go-bumbu/reference-app/app/spa"
 	"github.com/go-bumbu/reference-app/internal/notes"
 	"github.com/go-bumbu/reference-app/internal/tenants"
-	"github.com/go-bumbu/reference-app/libs/gormdb"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -183,7 +185,7 @@ func openDB(cfg dbCfg, l *slog.Logger) (*gorm.DB, error) {
 			LogLevel:                  gormlogger.Warn,
 		},
 	)
-	db, err := gormdb.Open(gcfg)
+	db, err := gormdb.Open(gcfg, gormdb.Drivers{Sqlite: sqlite.Driver{}, Postgres: postgres.Driver{}})
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)
 	}

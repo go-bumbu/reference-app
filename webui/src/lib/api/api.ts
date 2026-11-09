@@ -20,3 +20,11 @@ export async function getNote(id: string): Promise<Note> {
 export async function createNote(input: NoteInput): Promise<Note> {
     return (await apiClient.post<Note>('/notes', input)).data
 }
+
+export async function updateNote(id: string, input: NoteInput): Promise<Note> {
+    return (await apiClient.put<Note>(`/notes/${encodeURIComponent(id)}`, input)).data
+}
+
+export async function deleteNote(id: string): Promise<void> {
+    await apiClient.delete(`/notes/${encodeURIComponent(id)}`)
+}
