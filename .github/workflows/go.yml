@@ -1,0 +1,76 @@
+# Go checks: tests + coverage, golangci-lint, the license check and the OpenAPI
+# spec lint. One job each, so they run in parallel and fail independently; each
+# shows up on a PR as `go / <job>`. `make tag` does not run these — a release is
+# cut from a main that already passed them.
+name: go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: run tests
+        run: make test
+
+      - name: ensure test coverage
+        run: make coverage
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          # Pin the exact version so the bundled gosec ruleset matches local
+          # runs; version skew makes nolintlint flag directives inconsistently.
+          version: v2.13.2
+
+  license-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install go-licence-detector
+        run: go install go.elastic.co/go-licence-detector@v0.10.0
+
+      - name: License check
+        run: make license-check
+
+  # Lints the API contract (docs/openapi/api-v0.yaml); spectral runs via npx.
+  spec-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+
+      - name: Lint OpenAPI spec (Spectral)
+        run: make spec-lint

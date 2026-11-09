@@ -1,0 +1,321 @@
+openapi: 3.1.0
+info:
+  title: reference-app /api/v0 API
+  version: 0.1.0
+  contact:
+    name: Andres Bott
+    url: https://github.com/go-bumbu/reference-app
+  description: >
+    Reference API of the reference-app boilerplate: build information and a
+    prototype `notes` resource backed by the `internal/notes` module.
+
+
+    This document is written by hand (design-first) and is the contract of
+    `app/router/api_v0.go`. The tests in `app/router/openapi_test.go` fail when
+    a route is missing on either side, or when a response body does not match
+    its schema.
+
+
+    Errors are RFC 9457 problem details (`application/problem+json`). With
+    `Env.Production: true` the body is masked: only `type`, `title`, `status`
+    and `instance` are returned, without the internal `detail`.
+
+
+    Authentication is delegated, and selected by the server's `Auth.Method`:
+    `none` (every request acts as user `admin` of tenant `default`, for demos)
+    or `proxy` (a trusted reverse proxy asserts the user, and optionally the
+    tenant, in headers named by `Auth.ProxyHeader`). Operations that answer
+    `401` need an authenticated caller. Every note belongs to the caller's
+    tenant and is shared by all users of that tenant; another tenant's notes do
+    not exist for the caller (`404`).
+servers:
+  - url: /api/v0
+    description: >
+      Every path below is mount-relative. The base is modelled exclusively
+      through this `servers` entry, so bumping the version prefix stays a
+      one-line change, with no path or operationId edits.
+tags:
+  - name: info
+    description: Build and runtime information about the server.
+  - name: identity
+    description: The authenticated caller.
+  - name: notes
+    description: Prototype resource, backed by the `internal/notes` module and scoped to the caller's tenant.
+
+paths:
+  /info:
+    get:
+      operationId: getInfo
+      tags: [info]
+      summary: Get build information
+      description: >
+        Reports the build information baked into the binary at release time
+        (via `-ldflags`) and the Go version it was compiled with.
+      responses:
+        '200':
+          description: Build information.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Info'
+
+  /me:
+    get:
+      operationId: getMe
+      tags: [identity]
+      summary: Get the caller
+      description: >
+        Returns the authenticated caller: their user and tenant, created on the
+        first request of a new identity.
+      responses:
+        '200':
+          description: The caller.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /notes:
+    get:
+      operationId: listNotes
+      tags: [notes]
+      summary: List notes
+      description: Returns the notes of the caller's tenant, newest first.
+      responses:
+        '200':
+          description: The notes of the caller's tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NoteList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Internal'
+    post:
+      operationId: createNote
+      tags: [notes]
+      summary: Create a note
+      description: >
+        Creates a note in the caller's tenant; the id, the author and the
+        creation time are assigned by the server.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NoteInput'
+      responses:
+        '201':
+          description: The created note.
+          headers:
+            Location:
+              description: URL of the created note.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /notes/{noteId}:
+    parameters:
+      - $ref: '#/components/parameters/NoteId'
+    get:
+      operationId: getNote
+      tags: [notes]
+      summary: Get a note
+      description: Returns a single note of the caller's tenant by id.
+      responses:
+        '200':
+          description: The note.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+components:
+  parameters:
+    NoteId:
+      name: noteId
+      in: path
+      required: true
+      description: Id of the note.
+      schema:
+        type: string
+        maxLength: 64
+
+  schemas:
+    Info:
+      type: object
+      additionalProperties: false
+      required: [version, buildTime, commit, goVersion]
+      properties:
+        version:
+          type: string
+          description: Release version, `dev-build` for local builds.
+          examples: [v1.2.3]
+        buildTime:
+          type: string
+          description: Build date, `unknown` for local builds.
+        commit:
+          type: string
+          description: Git commit sha of the build, `undefined` for local builds.
+        goVersion:
+          type: string
+          description: Go version the binary was compiled with.
+          examples: [go1.27.1]
+
+    NoteInput:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:
+          type: string
+          description: Leading and trailing whitespace is trimmed; must not be empty afterwards.
+          minLength: 1
+          maxLength: 200
+        body:
+          type: string
+          maxLength: 10000
+
+    Me:
+      type: object
+      additionalProperties: false
+      required: [userId, subject, tenantId, tenant]
+      properties:
+        userId:
+          type: string
+          description: Id of the user, stable for the subject within the tenant.
+        subject:
+          type: string
+          description: The login the authentication method asserted.
+          examples: [admin]
+        tenantId:
+          type: string
+          description: Id of the caller's tenant.
+        tenant:
+          type: string
+          description: Slug of the caller's tenant.
+          examples: [default]
+
+    Note:
+      type: object
+      additionalProperties: false
+      required: [id, createdBy, title, body, createdAt]
+      properties:
+        id:
+          type: string
+        createdBy:
+          type: string
+          description: Id of the user who created the note (see `Me.userId`).
+        title:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    NoteList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Note'
+
+    Problem:
+      type: object
+      description: RFC 9457 problem details.
+      required: [type, title, status]
+      properties:
+        type:
+          type: string
+          description: Opaque URI identifying the problem type; its last path segment is a stable slug.
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+          description: Human readable explanation; omitted in production mode.
+        instance:
+          type: string
+          description: Path of the request that failed.
+        reference:
+          type: string
+          description: Correlation id of the request, when available.
+
+    ValidationProblem:
+      description: A problem with the list of fields that failed validation.
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                required: [pointer, detail]
+                properties:
+                  pointer:
+                    type: string
+                    description: JSON pointer (RFC 6901) to the failing field, e.g. `/title`.
+                  detail:
+                    type: string
+
+  responses:
+    BadRequest:
+      description: The request body is not valid JSON or does not match the expected shape.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    ValidationError:
+      description: The request is well-formed but breaks a business rule.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+    Unauthorized:
+      description: >
+        The caller is not authenticated: no identity was asserted, or it came
+        from an untrusted peer.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: The resource does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Internal:
+      description: Unexpected server error.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'

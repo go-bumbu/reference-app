@@ -1,0 +1,45 @@
+# refapp server configuration (package defaults).
+#
+# Loaded from /etc/refapp/config.yaml (the systemd unit passes it explicitly).
+# Every value can also be set via environment variables prefixed with REFAPP_
+# (e.g. REFAPP_SERVER_PORT=8090), which take precedence over this file; for the
+# service, set them with `systemctl edit refapp.service` (Environment=...).
+#
+# This file is marked as a dpkg conffile: your edits survive package upgrades.
+# Every key is documented in the sample config of the repository (zarf/config.yaml).
+
+Server:
+  Port: 8080
+  # Localhost only: put a reverse proxy (nginx/Traefik/Caddy, optionally with
+  # Authelia) on the same host in front of it. Do not bind a public interface
+  # while Auth.Method is "none".
+  BindIp: "127.0.0.1"
+
+# Observability endpoints (metrics, health, ready). Off by default; when enabled,
+# keep it off the public interface.
+Observability:
+  Enabled: false
+  Port: 9090
+  BindIp: "127.0.0.1"
+
+# The database lives under /var/lib/refapp, owned by the refapp user.
+DB:
+  Type: "sqlite"
+  Sqlite:
+    Path: "/var/lib/refapp/sqlite/refapp.db"
+
+# "none": every request is user "admin" of tenant "default" (demo only).
+# "proxy": the reverse proxy asserts the identity in headers; it must strip
+# those headers from client requests.
+Auth:
+  Method: "none"
+  ProxyHeader:
+    UserHeader: "Remote-User"
+    TenantHeader: ""
+    TrustedProxies:
+      - "127.0.0.1"
+      - "::1"
+
+Env:
+  LogLevel: "info"
+  Production: true

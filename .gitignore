@@ -1,0 +1,35 @@
+# ---> Go
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+.directory
+
+# Test binary, build with `go test -c`
+*.test
+
+# IDE shenanigans
+*.iml
+.idea/
+
+# build output
+dist/
+
+# SPA: built by `make package-ui`, embedded by app/spa
+app/spa/files/ui/*
+!app/spa/files/ui/.gitkeep
+webui/node_modules/
+webui/dist/
+
+# project databases
+**/__tests__
+# ...but not the web UI's unit tests
+!webui/src/__tests__/
+**/testdbs_sqlite
+carbon.db
+zarf/appData/session
+zarf/appData/sqlite
+data/
+!zarf/appData/session/.gitkeep

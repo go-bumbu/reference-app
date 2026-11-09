@@ -1,0 +1,57 @@
+# Sample configuration, used by `make run`.
+#
+# Without -c the server looks for ./config.yaml, then /etc/refapp/config.yaml; with
+# none found the built-in defaults apply. A file passed with -c must exist.
+# Every value can also be set via env vars prefixed with REFAPP_
+# (e.g. REFAPP_SERVER_PORT=8080), or in a .env file in the working directory;
+# env vars take precedence over this file.
+
+Server:
+  Port: 8081
+  BindIp: "localhost"
+
+# Observability endpoints (metrics, health, ready). Off by default; when enabled,
+# keep it off the public interface.
+Observability:
+  Enabled: true
+  Port: 9090
+  BindIp: "localhost"
+
+# Database: "sqlite" (a local file, default) or "postgres". Only the section
+# matching Type is used. Keep secrets out of this file, e.g.
+# REFAPP_DB_POSTGRES_PASSWORD=... as an env var or in .env.
+DB:
+  Type: "sqlite"
+  Sqlite:
+    # relative to the working directory; SQLite keeps -wal/-shm files next to it
+    Path: "zarf/appData/sqlite/refapp.db"
+  Postgres:
+    Host: "localhost"
+    Port: 5432
+    User: "refapp"
+    DbName: "refapp"
+    SslMode: "disable" # local development only; the default is "require"
+
+# Authentication is delegated; the app only maps the asserted identity onto a
+# tenant and a user, creating both on first sight.
+#   none:  every request is user "admin" of tenant "default" (demos only)
+#   proxy: a trusted reverse proxy (Authelia, oauth2-proxy, ...) asserts the
+#          identity in headers. The app must be reachable only through the
+#          proxy, and the proxy must strip these headers from client requests.
+#   oidc:  not implemented yet; the server refuses to start with it
+Auth:
+  Method: "none"
+  ProxyHeader:
+    UserHeader: "Remote-User"
+    # Empty puts every user in the "default" tenant; when set, a request
+    # without it is refused.
+    TenantHeader: "Remote-Tenant"
+    # CIDRs or bare IPs allowed to assert the headers; empty trusts every peer.
+    TrustedProxies:
+      - "127.0.0.1"
+      - "::1"
+
+Env:
+  LogLevel: "info"
+  # true masks API error bodies (no internal detail reaches the client)
+  Production: false

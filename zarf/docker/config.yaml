@@ -1,0 +1,32 @@
+# refapp server configuration (container image defaults).
+#
+# Every key is documented in zarf/config.yaml. Override single values with REFAPP_*
+# environment variables (e.g. REFAPP_AUTH_METHOD=proxy), or mount your own file
+# over /etc/refapp/config.yaml.
+
+Server:
+  Port: 8080
+  # All interfaces: inside a container loopback is unreachable from the host.
+  BindIp: "0.0.0.0"
+
+Observability:
+  Enabled: false
+  Port: 9090
+  BindIp: "127.0.0.1"
+
+# Mount a volume at /var/lib/refapp to keep the database.
+DB:
+  Type: "sqlite"
+  Sqlite:
+    Path: "/var/lib/refapp/sqlite/refapp.db"
+
+# "none" makes every request user "admin" of tenant "default": fine for trying
+# the image locally, NOT for anything reachable by others. Behind an
+# authenticating reverse proxy set REFAPP_AUTH_METHOD=proxy and list the proxy in
+# Auth.ProxyHeader.TrustedProxies (mount your own config).
+Auth:
+  Method: "none"
+
+Env:
+  LogLevel: "info"
+  Production: true

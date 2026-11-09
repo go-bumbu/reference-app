@@ -1,0 +1,43 @@
+[Unit]
+Description=refapp server
+Documentation=https://github.com/go-bumbu/reference-app
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=refapp
+Group=refapp
+ExecStart=/usr/bin/refapp start --config /etc/refapp/config.yaml
+Restart=on-failure
+RestartSec=5s
+
+# WorkingDirectory matters: relative paths in the config (e.g. DB.Sqlite.Path)
+# resolve against it. /var/lib/refapp keeps a relative config working.
+WorkingDirectory=/var/lib/refapp
+
+# Hardening. Everything outside ReadWritePaths is read-only; if you point
+# DB.Sqlite.Path elsewhere, add that directory via a drop-in:
+# systemctl edit refapp.service
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+ReadWritePaths=/var/lib/refapp
+
+[Install]
+WantedBy=multi-user.target

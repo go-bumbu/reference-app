@@ -1,0 +1,213 @@
+version: 2
+# Releases run in CI (.github/workflows/release.yml) on a pushed v*.*.* tag. The
+# workflow runs `make package-ui` before goreleaser, so the web UI embedded in
+# every binary (app/spa) and the refapp-spa.zip archive are the same build.
+# macOS lives in .goreleaser-darwin.yaml and appends to the release made here.
+builds:
+  # =====================================================================================
+  # Linux build — baseline (GOAMD64 v1). Runs on any x86-64 CPU ever made, plus
+  # arm64. This is the safe default users should pick unless they know better.
+  # The v3 variant lives in linux-opt below; only v1 and v3 are published — v2
+  # adds little over v1, and v4 (AVX-512) would not start on Intel 12th-15th gen
+  # consumer CPUs, which fuse AVX-512 off. Go selects the level at compile time
+  # with no runtime fallback: a too-new binary dies with SIGILL at startup.
+  # =====================================================================================
+  - id: linux
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    goamd64:
+      - v1
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/go-bumbu/reference-app/app/metainfo.Version={{.Version}}
+      - -X github.com/go-bumbu/reference-app/app/metainfo.BuildTime={{.Date}}
+      - -X github.com/go-bumbu/reference-app/app/metainfo.ShaVer={{.Commit}}
+    binary: refapp
+    # Pure Go: the SQLite driver (glebarez/modernc) and the Postgres driver (pgx)
+    # need no C toolchain. CGO_ENABLED=0 yields a static binary with no glibc
+    # floor, so the same artifact runs on Debian, older distros and Alpine
+    # (including the container image), and every target cross-compiles.
+    # Check `file dist/linux*/refapp` says "statically linked" before adding a
+    # dependency that needs CGO.
+    env:
+      - CGO_ENABLED=0
+
+  # =====================================================================================
+  # Linux build — GOAMD64 v3 (AVX2/BMI2: Intel Haswell 2013+, AMD Zen 2017+).
+  # Packaged as both zip and deb, same as the baseline.
+  # =====================================================================================
+  - id: linux-opt
+    goos:
+      - linux
+    goarch:
+      - amd64
+    goamd64:
+      - v3
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X github.com/go-bumbu/reference-app/app/metainfo.Version={{.Version}}
+      - -X github.com/go-bumbu/reference-app/app/metainfo.BuildTime={{.Date}}
+      - -X github.com/go-bumbu/reference-app/app/metainfo.ShaVer={{.Commit}}
+    binary: refapp
+    env:
+      - CGO_ENABLED=0
+
+  # =====================================================================================
+  # Windows build
+  # =====================================================================================
+  - id: windows
+    goos:
+      - windows
+    goarch:
+      - amd64
+    goamd64:
+      - v1
+      - v3
+    ldflags:
+      - -s -w
+      - -X github.com/go-bumbu/reference-app/app/metainfo.Version={{.Version}}
+      - -X github.com/go-bumbu/reference-app/app/metainfo.BuildTime={{.Date}}
+      - -X github.com/go-bumbu/reference-app/app/metainfo.ShaVer={{.Commit}}
+    flags:
+      - -trimpath
+    binary: refapp
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - formats: [zip]
+    name_template: >-
+      refapp_
+      {{- title .Os  }}_
+      {{- if eq .Arch "amd64" }}x86_64_{{ .Amd64 }}
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+
+  # =====================================================================================
+  # refapp-spa.zip — the built web UI alone (no binaries), for serving it or
+  # embedding it elsewhere. Built from webui/dist, which `make package-ui` fills
+  # before goreleaser runs; a missing webui/dist fails the release rather than
+  # publishing an empty zip. Flat layout (index.html at the root) so it unzips
+  # straight into a web root. Only in this config — the darwin one appends to
+  # the same release and would upload it twice.
+  # =====================================================================================
+  - id: spa
+    meta: true
+    formats: [zip]
+    name_template: refapp-spa
+    files:
+      - LICENSE
+      # A directory src keeps its tree; dst "." drops the webui/dist/ prefix.
+      - src: webui/dist
+        dst: .
+
+nfpms:
+  -
+    id: refapp
+    package_name: refapp
+    ids:
+      - linux
+      - linux-opt
+    # A .deb's Architecture field cannot express an amd64 micro-level, so both
+    # amd64 debs declare Architecture: amd64 and are told apart by filename
+    # only. Fine for direct download (GitHub release); if these are ever served
+    # from an apt repository the v3 deb must be dropped or moved to its own
+    # suite, since apt would see two candidates for the same package+arch.
+    file_name_template: >-
+      {{ .PackageName }}_{{ .Version }}_{{ .Os }}_
+      {{- if eq .Arch "amd64" }}amd64_{{ .Amd64 }}
+      {{- else }}{{ .Arch }}{{ end }}
+
+    maintainer: "info@go-bumbu"
+    homepage: https://github.com/go-bumbu/reference-app
+    license: GPL-3.0-only
+    section: default
+    priority: optional
+    description: |
+      Reference boilerplate for Go applications.
+      Ships as a single static binary with the web UI embedded.
+    formats:
+      - deb
+
+    contents:
+      - src: README.md
+        dst: /usr/share/doc/refapp/README.md
+      - src: LICENSE
+        dst: /usr/share/doc/refapp/LICENSE
+      - src: zarf/packaging/refapp.service
+        dst: /lib/systemd/system/refapp.service
+      - src: zarf/packaging/config.yaml
+        dst: /etc/refapp/config.yaml
+        type: config|noreplace
+      # Created by postinstall with refapp:refapp ownership; declared here so dpkg
+      # tracks it and `dpkg -P` can clean up the empty directory.
+      - dst: /var/lib/refapp
+        type: dir
+        file_info:
+          mode: 0750
+
+    scripts:
+      preinstall: zarf/packaging/preinstall.sh
+      postinstall: zarf/packaging/postinstall.sh
+      preremove: zarf/packaging/preremove.sh
+      postremove: zarf/packaging/postremove.sh
+
+# =====================================================================================
+# Container image — ghcr.io/go-bumbu/refapp, multi-arch (amd64 + arm64).
+# Only the baseline `linux` build: linux-opt is also linux/amd64 and the two
+# would collide on the same platform; an image must run on any amd64 host.
+# Prereleases (v1.2.3-rc1) get only their exact version tag, never latest or
+# the moving major.minor tag.
+# =====================================================================================
+dockers_v2:
+  - id: refapp
+    ids:
+      - linux
+    dockerfile: zarf/docker/Dockerfile
+    extra_files:
+      - zarf/docker/config.yaml
+    images:
+      - "ghcr.io/go-bumbu/refapp"
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}{{ .Major }}.{{ .Minor }}{{ end }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      # Links the ghcr package to the repository.
+      "org.opencontainers.image.source": "https://github.com/go-bumbu/reference-app"
+    annotations:
+      "org.opencontainers.image.title": "refapp"
+      "org.opencontainers.image.description": "Reference boilerplate for Go applications."
+      "org.opencontainers.image.source": "https://github.com/go-bumbu/reference-app"
+      "org.opencontainers.image.licenses": "GPL-3.0-only"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.created": "{{ .Date }}"
+
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# vim: set ts=2 sw=2 tw=0 fo=cnqoj

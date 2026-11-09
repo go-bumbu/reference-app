@@ -1,0 +1,38 @@
+/* App-wide tokens on top of PrimeVue's: components and views use --app-*, never
+   raw colors, so light and dark mode stay one class switch apart. */
+:root {
+    --font-sans: 'Inter Variable', system-ui, sans-serif;
+    --app-background: var(--c-surface-50);
+    --app-panel: var(--c-surface-0);
+    --app-border: var(--c-surface-200);
+    --app-text-primary: var(--c-text-color);
+    --app-text-muted: var(--c-text-muted-color);
+}
+
+.dark-mode {
+    --app-background: var(--c-surface-950);
+    --app-panel: var(--c-surface-900);
+    --app-border: var(--c-surface-700);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.4;
+    background-color: var(--app-background);
+    color: var(--app-text-primary);
+    -webkit-font-smoothing: antialiased;
+}
+
+a {
+    color: var(--c-primary-color);
+}
+
+.muted {
+    color: var(--app-text-muted);
+}

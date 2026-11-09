@@ -1,0 +1,35 @@
+# Web UI (webui/) checks: type-check + unit tests, then the production build
+# the server embeds, so a build break is caught before a release. Shows up on a
+# PR as `webui / test`.
+name: webui
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: webui/package-lock.json
+
+      - name: Install NPM dependencies
+        working-directory: webui
+        run: npm ci
+
+      - name: Run UI tests
+        run: make ui-test
+
+      - name: Build frontend
+        run: make package-ui
