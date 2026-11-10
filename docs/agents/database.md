@@ -41,7 +41,7 @@ Shown by `internal/notes/store.go` and `internal/tenants/store.go`:
   persistence models. Need another module's data? Ask its API through an interface `app/` passes in.
 - **Row types are private** (`noteRow`) and pinned with `TableName()`, so renaming the Go type does not move data.
   Domain types (`notes.Note`) carry no GORM tags; the store maps explicitly between them, so the schema can change
-  without touching the public API. (The `//nolint:staticcheck // S1016` on that mapping is deliberate.)
+  without touching the public API.
 - **GORM errors stop at the store**: `gorm.ErrRecordNotFound` becomes `notes.ErrNotFound`; everything else is wrapped
   with the operation (`"select note: %w"`). Handlers never see a GORM type.
 - **Column sizes mirror the validation constants** (`size:200` ↔ `MaxTitleLen`); change both together, and keep the
@@ -54,6 +54,42 @@ Shown by `internal/notes/store.go` and `internal/tenants/store.go`:
   (`created_at DESC, id ASC`) for a stable order.
 - IDs are 16 random hex chars (`crypto/rand`), generated in the module, not by the database.
 - Inject the clock through `Cfg.Now`; never call `time.Now` directly in module logic.
+
+## Trees: the tags of `internal/notes`
+
+The tag tree is a closure table kept by [`github.com/go-bumbu/closure-tree`](https://github.com/go-bumbu/closure-tree)
+(`internal/notes/tagstore.go`), after codex's media tags:
+
+- `tagRow` embeds `closuretree.Node` (id, tenant scope, sibling `sort_order`) and adds the name; its table is
+  `note_tags`, and the library keeps `closure_tree_rel_note_tags`, `closure_tree_meta_note_tags` and
+  `closure_tree_lock_note_tags` beside it. `store.migrate` runs `tree.Migrate()` after `AutoMigrate`.
+- The library's tenant scope is the note tenant's id as it is: every tree call is scoped, so another tenant's tags
+  do not exist. Tag ids are the library's auto-increment ids (the one exception to module-generated ids).
+- `note_tag_links` (tenant, note, tag) links notes and tags. Listing a tag's notes joins it to the closure table
+  (`ancestor_id` = the tag), so the subtree comes along without recursion; reading a note's tags joins `note_tags`, so
+  a link a concurrent tag delete left behind is never returned.
+- **Every tree write binds a tree to the transaction** (`newTree(tx)`, `store.tagTx`): the library's own writes then
+  become savepoints of it, and the tree and the module's tables commit together. A tree bound to the store's `db`
+  inside a transaction would wait forever for SQLite's one writer.
+- Create uses `GetOrAdd` (find-or-insert under the library's per-tenant lock) so two creates of one name cannot both
+  win; rename and move check sibling names in the transaction (a check, not a constraint).
+- Pass `nil` (not a typed nil pointer) as the payload of `tree.Update` when the name does not change: a typed nil
+  reads as a payload.
+- After a reorder the store respaces the siblings' `sort_order` once `NeedsRenormalize` says the float64 halvings
+  run low (`TestTagOrderSurvivesManyReorders`).
+- The store's own tree (`readTree`) is bound to `db.Clauses(gormdb.Read).Session(...)`: closure-tree reads with
+  recursive CTEs (`WITH ...`), which the SQLite resolver would otherwise send to the one writer. Migration binds a
+  tree to `db.WithContext(ctx)`, as `Migrate` takes no context.
+- **Id 0 is closure-tree's virtual root**, ancestor of every tag: `DeleteRecurse(0)` would delete the whole tree.
+  The Service refuses 0 (and ids past int64, which no database binds) as `ErrTagNotFound` before the store
+  (`TestTagIDZeroIsNoTag`).
+- A tenant has at most `MaxTagsPerTenant` tags, counted in the create's transaction.
+- The links have no foreign keys (closure-tree owns the tag table). On Postgres a link can be written right after a
+  concurrent delete of its tag; reads skip it (`TestLinkToAMissingTagIsNotReturned`) and it stays until its note is
+  deleted — accepted, as it is invisible and bounded by the notes.
+- Concurrency tests that write from several goroutines run SQLite as the app opens it (`gormdbtest.Sqlite`, one
+  writer that the others queue for): the bare testdbs database answers `SQLITE_BUSY` instead
+  (`TestConcurrentCreateOfOneName`).
 
 ## Migrations — known debt
 

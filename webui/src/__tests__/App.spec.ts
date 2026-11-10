@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises } from '@vue/test-utils'
 import App from '@/App.vue'
 import * as api from '@/lib/api/api'
@@ -7,6 +7,13 @@ import { mountWithApp, problem } from './helpers'
 vi.mock('@/lib/api/api')
 
 describe('App', () => {
+    beforeEach(() => {
+        vi.mocked(api.listTags).mockResolvedValue([
+            { id: 1, parentId: 0, name: 'work', children: [] }
+        ])
+        vi.mocked(api.listNotes).mockResolvedValue([])
+    })
+
     it('shows who is signed in', async () => {
         vi.mocked(api.getMe).mockResolvedValue({
             userId: 'u1',
@@ -83,6 +90,13 @@ describe('App', () => {
         await w.find('[data-test="search-clear"]').trigger('click')
         await flushPromises()
         expect(w.vm.$route.query.q).toBeUndefined()
+
+        // on the list of a tag, the search narrows that tag's notes
+        await w.vm.$router.push('/?tag=1')
+        await flushPromises()
+        await w.find('[data-test="search-input"]').setValue('milk')
+        await flushPromises()
+        expect(w.vm.$route.query).toEqual({ tag: '1', q: 'milk' })
     })
 
     it('opens the create dialog from the top bar', async () => {

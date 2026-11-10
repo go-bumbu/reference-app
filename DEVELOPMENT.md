@@ -37,13 +37,18 @@ coverage, lint, the license check, the spec lint and the UI tests, but not the b
 ## Run locally
 
 ```sh
-make run            # start the service with zarf/config.yaml
+make run            # start the service with zarf/config.yaml, adding demo data on the first run
 make run-ui         # build the web UI, then start the service with it embedded
+make clean          # delete dist/ and the local database, demo data included
 ```
 
 The sample config listens on <http://localhost:8081>, with the observability server (`/metrics`, `/health`,
 `/ready`) on `localhost:9090`. It uses SQLite under `zarf/appData/` and `Auth.Method: none`, so every request is
 user `admin` of tenant `default`.
+
+On a fresh database, `make run` first runs `refapp seed`, which adds a demo tag tree and a few notes for that user,
+then touches `zarf/appData/sqlite/.demo-data` so later runs skip it. `make clean` deletes the whole
+`zarf/appData/sqlite/` directory, so the next `make run` starts over with fresh demo data.
 
 For UI work with hot reload, run `make run` in one terminal and `make ui-dev` in another (run `make ui-prepare`
 once first); the Vite dev server proxies `/api` to the backend. See [docs/agents/web-ui.md](docs/agents/web-ui.md) for
@@ -53,7 +58,7 @@ playing the auth proxy from the dev server.
 
 ```sh
 make build          # build the web UI, then the binary for the current OS/arch into dist/
-make clean          # remove dist/
+make clean          # remove dist/ and the local database of `make run`
 ```
 
 Try the whole release locally without publishing: `make package-ui && goreleaser release --snapshot --clean`.

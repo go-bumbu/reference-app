@@ -73,6 +73,10 @@ All settled at bootstrap (2026-11-09, commit `650c99c`) unless dated otherwise.
   host — [releasing.md](releasing.md).
 - **Errors, not panics, at startup**: every constructor (`router.New`, `notes.New`, `gormdb.Open`) validates its
   dependencies and returns an error, so a bad wiring fails the `start` command with one message.
+- **Tags are part of `internal/notes`** (2026-11-10): one tree per tenant in a closure table
+  (`go-bumbu/closure-tree`), after codex's media tags without tag groups or facets. Listing a tag's notes is a join
+  across the tag tree and the notes, so tags stay in the module that owns the notes instead of becoming a module of
+  their own — [database.md](database.md).
 - **Placeholders a copy must rename** are marked `// TODO replace` (`appName`, `EnvVarPrefix`, `problemBaseURI`).
 
 ## Known debt

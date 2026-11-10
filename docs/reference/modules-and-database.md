@@ -61,6 +61,24 @@ database. Background:
   puts the tenant in it (codex: `"<tenant_id>:<space_id>"` for `libs/docstore`). Build the scope in one place
   (codex: `internal/blobscope`), so no caller forgets the tenant.
 
+## Hierarchies (tag trees, folders)
+
+Keep a tree in a closure table with [`go-bumbu/closure-tree`](https://github.com/go-bumbu/closure-tree), in the
+module that owns what the tree organises: listing the items under a node is then one join to the closure table,
+subtree included, and no query crosses a module. *(reference-app: `internal/notes/tagstore.go`; codex:
+`internal/model/media/tags.go`)*
+
+- Embed `closuretree.Node` in a private row type and use the tenant id (or a scope built from it) as the library's
+  tenant, so every tree call is scoped.
+- Bind a tree to the transaction for every write (`closuretree.New(tx, row{})`): its writes become savepoints and
+  commit with the module's own rows.
+- Create with `GetOrAdd` when names are unique among siblings: the find and the insert run under the library's
+  per-tenant lock. Moves are checked first (not under itself or a descendant, the parent in the tree) so the
+  caller learns which rule broke.
+- Expose the tree as nested nodes (`{id, parentId, name, children}`); take a move as `parentId` and a place among
+  siblings as `afterId` (0 = first), the library's own convention.
+- Respace sibling order when `NeedsRenormalize` says so, after a reorder.
+
 ## Caches of derived data
 
 Cache a derived result (counts, a snapshot) only after measuring the query it replaces. Then keep the cache honest

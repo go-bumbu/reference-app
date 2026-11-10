@@ -7,7 +7,8 @@
 // router to keep both honest).
 //
 // Errors returned by the API are *Problem values (RFC 9457); compare them with
-// errors.Is against ErrNotFound, ErrUnauthorized and ErrValidation, or use
+// errors.Is against ErrNotFound, ErrUnauthorized, ErrValidation and
+// ErrConflict, or use
 // errors.As for the details.
 package client
 
@@ -20,6 +21,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -102,12 +104,43 @@ type Note struct {
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
 	CreatedAt time.Time `json:"createdAt"`
+	// TagIDs are the tags the note carries, ascending.
+	TagIDs []uint `json:"tagIds"`
 }
 
 // NoteInput holds the fields of a new note.
 type NoteInput struct {
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
+}
+
+// ListNotesOptions narrows ListNotes; the zero value lists every note.
+type ListNotesOptions struct {
+	// Tag keeps the notes that carry the tag or a tag below it.
+	Tag uint
+}
+
+// Tag is a tag of the caller's tenant with its subtree. ParentID is 0 at the root.
+type Tag struct {
+	ID       uint   `json:"id"`
+	ParentID uint   `json:"parentId"`
+	Name     string `json:"name"`
+	Children []Tag  `json:"children"`
+}
+
+// TagInput holds the fields of a new tag: ParentID 0 is the root, and a nil
+// AfterID places it first among its siblings.
+type TagInput struct {
+	Name     string `json:"name"`
+	ParentID uint   `json:"parentId,omitempty"`
+	AfterID  *uint  `json:"afterId,omitempty"`
+}
+
+// TagPatch changes a tag; a nil field is left as it is.
+type TagPatch struct {
+	Name     *string `json:"name,omitempty"`
+	ParentID *uint   `json:"parentId,omitempty"`
+	AfterID  *uint   `json:"afterId,omitempty"`
 }
 
 // Info returns the server's build information; it needs no authentication.
@@ -124,12 +157,16 @@ func (c *Client) Me(ctx context.Context) (Me, error) {
 	return out, err
 }
 
-// ListNotes returns the notes of the caller's tenant, newest first.
-func (c *Client) ListNotes(ctx context.Context) ([]Note, error) {
+// ListNotes returns the notes of the caller's tenant, newest first, narrowed by opts.
+func (c *Client) ListNotes(ctx context.Context, opts ListNotesOptions) ([]Note, error) {
 	var out struct {
 		Items []Note `json:"items"`
 	}
-	if err := c.do(ctx, http.MethodGet, "/notes", nil, http.StatusOK, &out); err != nil {
+	path := "/notes"
+	if opts.Tag != 0 {
+		path += "?tagId=" + strconv.FormatUint(uint64(opts.Tag), 10)
+	}
+	if err := c.do(ctx, http.MethodGet, path, nil, http.StatusOK, &out); err != nil {
 		return nil, err
 	}
 	return out.Items, nil
@@ -162,6 +199,64 @@ func (c *Client) UpdateNote(ctx context.Context, id string, in NoteInput) (Note,
 // DeleteNote deletes a note of the caller's tenant; a missing note is ErrNotFound.
 func (c *Client) DeleteNote(ctx context.Context, id string) error {
 	return c.do(ctx, http.MethodDelete, "/notes/"+url.PathEscape(id), nil, http.StatusNoContent, nil)
+}
+
+// AddNoteTag gives a note the tag and returns the note; a missing note or tag
+// is ErrNotFound. A note that carries the tag already is left as it is.
+func (c *Client) AddNoteTag(ctx context.Context, noteID string, tagID uint) (Note, error) {
+	var out Note
+	err := c.do(ctx, http.MethodPut, noteTagPath(noteID, tagID), nil, http.StatusOK, &out)
+	return out, err
+}
+
+// RemoveNoteTag takes the tag off a note and returns the note; a missing note
+// or tag is ErrNotFound.
+func (c *Client) RemoveNoteTag(ctx context.Context, noteID string, tagID uint) (Note, error) {
+	var out Note
+	err := c.do(ctx, http.MethodDelete, noteTagPath(noteID, tagID), nil, http.StatusOK, &out)
+	return out, err
+}
+
+func noteTagPath(noteID string, tagID uint) string {
+	return "/notes/" + url.PathEscape(noteID) + "/tags/" + strconv.FormatUint(uint64(tagID), 10)
+}
+
+// Tags returns the tag tree of the caller's tenant: the tags at the root, each
+// with its subtree.
+func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
+	var out struct {
+		Items []Tag `json:"items"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/tags", nil, http.StatusOK, &out); err != nil {
+		return nil, err
+	}
+	return out.Items, nil
+}
+
+// CreateTag creates a tag; input breaking a rule is ErrValidation, a name a
+// sibling has already is ErrConflict.
+func (c *Client) CreateTag(ctx context.Context, in TagInput) (Tag, error) {
+	var out Tag
+	err := c.do(ctx, http.MethodPost, "/tags", in, http.StatusCreated, &out)
+	return out, err
+}
+
+// UpdateTag renames, moves and/or reorders a tag and returns it with its
+// subtree; a missing tag is ErrNotFound, a patch breaking a rule ErrValidation,
+// a name a sibling has already ErrConflict.
+func (c *Client) UpdateTag(ctx context.Context, id uint, p TagPatch) (Tag, error) {
+	var out Tag
+	err := c.do(ctx, http.MethodPatch, tagPath(id), p, http.StatusOK, &out)
+	return out, err
+}
+
+// DeleteTag deletes a tag and its subtree; a missing tag is ErrNotFound.
+func (c *Client) DeleteTag(ctx context.Context, id uint) error {
+	return c.do(ctx, http.MethodDelete, tagPath(id), nil, http.StatusNoContent, nil)
+}
+
+func tagPath(id uint) string {
+	return "/tags/" + strconv.FormatUint(uint64(id), 10)
 }
 
 // do sends the request and decodes a wantStatus response into out; any other
@@ -214,6 +309,7 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 	ErrNotFound     = errors.New("not found")
 	ErrValidation   = errors.New("validation failed")
+	ErrConflict     = errors.New("conflict")
 )
 
 // Problem is an error response of the API: an RFC 9457 problem details body,
@@ -256,6 +352,8 @@ func (p *Problem) Is(target error) bool {
 		return p.Status == http.StatusNotFound
 	case ErrValidation:
 		return p.Status == http.StatusUnprocessableEntity
+	case ErrConflict:
+		return p.Status == http.StatusConflict
 	}
 	return false
 }

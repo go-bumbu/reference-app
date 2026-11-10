@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/getkin/kin-openapi v0.147.0
+	github.com/go-bumbu/closure-tree v0.10.0
 	github.com/go-bumbu/config v0.5.0
 	github.com/go-bumbu/db v0.1.0
 	github.com/go-bumbu/http v0.6.0

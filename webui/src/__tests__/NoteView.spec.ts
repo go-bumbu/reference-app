@@ -13,7 +13,8 @@ const note = {
     createdBy: 'u1',
     title: 'Plans',
     body: 'three little words',
-    createdAt: '2026-01-02T03:04:05Z'
+    createdAt: '2026-01-02T03:04:05Z',
+    tagIds: [] as number[]
 }
 
 // The page with the shell's ConfirmDialog next to it, as App.vue mounts it.
@@ -24,6 +25,7 @@ const WithConfirm = defineComponent({
 describe('NoteView', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        vi.mocked(api.listTags).mockResolvedValue([])
         vi.mocked(api.getMe).mockResolvedValue({
             userId: 'u1',
             subject: 'alice',
@@ -100,5 +102,34 @@ describe('NoteView', () => {
 
         expect(api.deleteNote).toHaveBeenCalledWith('n1')
         expect(w.vm.$route.name).toBe('notes')
+    })
+
+    it('shows the tags of the note by path, and edits them in the tag dialog', async () => {
+        vi.mocked(api.listTags).mockResolvedValue([
+            {
+                id: 1,
+                parentId: 0,
+                name: 'work',
+                children: [{ id: 2, parentId: 1, name: 'reports', children: [] }]
+            },
+            { id: 3, parentId: 0, name: 'home', children: [] }
+        ])
+        vi.mocked(api.getNote).mockResolvedValue({ ...note, tagIds: [2, 3] })
+        const w = await mountWithApp(NoteView, { id: 'n1' })
+
+        const chips = w.findAll('[data-test="note-tag"]')
+        expect(chips.map((c) => c.text())).toEqual(['work / reports', 'home'])
+        expect(chips[0].attributes('href')).toBe('/?tag=2')
+
+        await w.find('[data-test="edit-note-tags"]').trigger('click')
+        await flushPromises()
+        const picks = Array.from(document.body.querySelectorAll('[data-test="tag-pick"]'))
+        expect(picks.map((p) => p.getAttribute('aria-checked'))).toEqual(['false', 'true', 'true'])
+    })
+
+    it('says when the note has no tags', async () => {
+        vi.mocked(api.getNote).mockResolvedValue(note)
+        const w = await mountWithApp(NoteView, { id: 'n1' })
+        expect(w.find('[data-test="note-tags"]').text()).toContain('No tags.')
     })
 })

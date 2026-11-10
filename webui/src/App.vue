@@ -41,10 +41,15 @@ const addOpen = ref(false)
 // The search query lives in the URL (`?q=`), so it survives a reload and a
 // shared link; the notes list reads it from there. Typing on another page
 // takes you to the list. replace, not push: every keystroke is no history entry.
+// On the list, the search narrows the tag's notes (`?tag=`), which stays.
 const search = computed({
     get: () => (typeof route.query.q === 'string' ? route.query.q : ''),
     set: (q: string) => {
-        const target = { name: 'notes', query: q ? { q } : {} }
+        const tag =
+            route.name === 'notes' && typeof route.query.tag === 'string'
+                ? { tag: route.query.tag }
+                : {}
+        const target = { name: 'notes', query: { ...tag, ...(q ? { q } : {}) } }
         if (route.name === 'notes') router.replace(target)
         else if (q) router.push(target)
     }
@@ -351,16 +356,12 @@ const search = computed({
     .topbar-brand.collapsed .topbar-brand-link {
         display: inline-flex;
     }
-    .sidebar :deep(.sidebar-tag) {
-        justify-content: center;
-        gap: 0;
-        padding: 0.5rem 0;
-    }
-    .sidebar :deep(.sidebar-tag span) {
-        width: 0;
-    }
-    .sidebar :deep(.sidebar-heading) {
+    /* the tags as icons, as in the collapsed rail */
+    .sidebar :deep(.nav-full) {
         display: none;
+    }
+    .sidebar :deep(.nav-rail) {
+        display: flex;
     }
     .topbar-title,
     .sidebar-collapse-btn,

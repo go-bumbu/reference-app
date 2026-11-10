@@ -46,3 +46,39 @@ export async function mountWithApp(component: Component, props: Record<string, u
     await flushPromises()
     return wrapper
 }
+
+/** A fake DataTransfer: jsdom has none. `data` holds what the drag carries, by type. */
+export function fakeDataTransfer(data: Record<string, string> = {}) {
+    return {
+        data,
+        get types() {
+            return Object.keys(this.data)
+        },
+        dropEffect: 'none',
+        effectAllowed: 'all',
+        setData(type: string, value: string) {
+            this.data[type] = value
+        },
+        getData(type: string) {
+            return this.data[type] ?? ''
+        }
+    }
+}
+
+/**
+ * Dispatches a drag event on el: jsdom has no DragEvent, so it is a plain
+ * cancelable Event carrying a dataTransfer and the pointer's clientY.
+ * Returns the event, to check whether a handler took the drop (defaultPrevented).
+ */
+export function dispatchDrag(
+    el: Element,
+    type: string,
+    dataTransfer: ReturnType<typeof fakeDataTransfer>,
+    clientY = 0
+) {
+    const event = new Event(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+    Object.defineProperty(event, 'clientY', { value: clientY })
+    el.dispatchEvent(event)
+    return event
+}

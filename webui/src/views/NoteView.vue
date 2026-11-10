@@ -6,9 +6,11 @@ import Message from 'primevue/message'
 import { useConfirm } from 'primevue/useconfirm'
 import { useToast } from 'primevue/usetoast'
 import NoteDialog from '@/components/NoteDialog.vue'
-import { useDeleteNote, useMe, useNote } from '@/composables/useApi'
+import TagsDialog from '@/components/tags/TagsDialog.vue'
+import { useDeleteNote, useMe, useNote, useTags } from '@/composables/useApi'
 import { apiErrorMessage, apiErrorStatus } from '@/lib/apiError'
 import { formatDate } from '@/lib/format'
+import { flattenTags } from '@/lib/tagTree'
 
 // One note, after codex's file and wiki pages: a sheet of paper with the note
 // on it and, at its right, a column with the note's details and, at their
@@ -22,6 +24,14 @@ const { data: note, isPending, error } = useNote(() => props.id)
 const remove = useDeleteNote()
 
 const editOpen = ref(false)
+const tagsOpen = ref(false)
+
+// The note's tags, by path, in tree order; a link each to the notes under it.
+const { data: tags } = useTags()
+const noteTags = computed(() => {
+    const carried = new Set(note.value?.tagIds ?? [])
+    return flattenTags(tags.value ?? []).filter((f) => carried.has(f.tag.id))
+})
 
 const author = computed(() => {
     if (!note.value) return ''
@@ -127,8 +137,35 @@ function onDelete() {
                         </button>
                     </div>
                 </section>
+                <section class="side-card tags-panel" aria-label="Note tags" data-test="note-tags">
+                    <div class="tags-head">
+                        <h2 class="detail-label">Tags</h2>
+                        <button
+                            type="button"
+                            class="bar-btn"
+                            title="Add or remove tags"
+                            data-test="edit-note-tags"
+                            @click="tagsOpen = true"
+                        >
+                            <i class="pi pi-tags" aria-hidden="true" />&nbsp;Edit
+                        </button>
+                    </div>
+                    <ul v-if="noteTags.length" class="tag-chips">
+                        <li v-for="f in noteTags" :key="f.tag.id">
+                            <RouterLink
+                                :to="{ name: 'notes', query: { tag: String(f.tag.id) } }"
+                                class="chip"
+                                :title="`Notes tagged ${f.path}`"
+                                data-test="note-tag"
+                                >{{ f.path }}</RouterLink
+                            >
+                        </li>
+                    </ul>
+                    <p v-else class="muted no-tags">No tags.</p>
+                </section>
             </aside>
             <NoteDialog v-model:visible="editOpen" :note="note" />
+            <TagsDialog v-model:visible="tagsOpen" :note="note" />
         </div>
     </div>
 </template>
@@ -146,6 +183,58 @@ function onDelete() {
     border: 1px solid var(--app-border);
     border-radius: var(--app-radius-lg);
     background: var(--app-panel);
+}
+
+/* --- The note's tags, a card below the details --- */
+.tags-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+}
+
+.tags-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.tags-head h2 {
+    margin: 0;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.tag-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.chip {
+    display: inline-block;
+    max-width: 100%;
+    padding: 0.12rem 0.55rem;
+    border-radius: 999px;
+    background: var(--app-accent-soft);
+    color: var(--app-text-primary);
+    font-size: 0.8rem;
+    font-weight: 500;
+    text-decoration: none;
+    overflow-wrap: anywhere;
+}
+.chip:hover {
+    color: var(--app-accent);
+}
+.chip:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px var(--app-focus-ring);
+}
+
+.no-tags {
+    margin: 0;
+    font-size: 0.85rem;
 }
 
 /* --- The note's actions, at the foot of the details card: Edit fills the

@@ -38,6 +38,22 @@ unless the app has a reason to differ.
   login redirect. Only the `/me` call or a global response interceptor decides this, not each view. *(aether:
   `useAuth`, which reads the auth method from `/me`)*
 
+## Trees and drag and drop *(reference-app tags)*
+
+- **One editor dialog per tree**, opened where the tree shows (reference-app: the sidebar's pencil, the note page's
+  Tags card). The sidebar only navigates and takes drops; nothing about the tree goes into the settings.
+- **Keep tree rules in pure functions** (`lib/tagTree.ts`): which drop is allowed (no cycle, no no-op) and which
+  PATCH it means, unit-tested without a DOM. Components only measure the pointer and call them.
+- **Give each drag its own MIME type** (`application/x-refapp-note`, `…-tag`) and accept a drop only when
+  `dataTransfer.types` holds it, so links, files and the other drag are ignored.
+- **Every drag has a non-drag twin**: HTML5 drag fires neither on touch nor from the keyboard (reference-app: "Move
+  to…" in the tag editor). Clear drop marks on `dragleave`, `dragend` and when the dialog closes.
+- **Links that differ only by query** (filters of one list) go through `RouterLink`'s `custom` slot with your own
+  `aria-current`: RouterLink ignores the query and marks them all active.
+- **Each drop or pick awaits its own `mutateAsync`**, so quick repeats each get their feedback.
+- jsdom has no `DragEvent` or `DataTransfer`: test with a fake (`__tests__/helpers.ts` `dispatchDrag`), and give a
+  row a `getBoundingClientRect` to aim at.
+
 ## Embedding (`app/spa`)
 
 - `make package-ui` builds `webui/` and copies `dist/` into `app/spa/files/ui`. `//go:embed all:files/ui` embeds it.

@@ -6,7 +6,10 @@ See [architecture.md](architecture.md) for the tiers, [database.md](database.md)
 
 ## CLI
 
-- `refapp start [-c file]` runs the servers; `refapp version` prints the build metadata (`app/metainfo`, set by
+- `refapp start [-c file]` runs the servers; `refapp seed [-c file]` adds demo notes and tags for the auth-none
+  identity (`DefaultTenant`/`DefaultUser`) through the modules' APIs and is not idempotent: `make run` runs it
+  once per database, tracked by the `.demo-data` marker next to the db, and `make clean` deletes the db dir;
+  `refapp version` prints the build metadata (`app/metainfo`, set by
   goreleaser `-ldflags`; `dev-build` otherwise).
 - The root command sets `SilenceUsage` and `SilenceErrors`: a runtime error (bad config, port in use) is not a usage
   error, so `Execute` prints it once and exits `1`.

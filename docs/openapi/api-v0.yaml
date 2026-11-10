@@ -28,6 +28,12 @@ info:
     `401` need an authenticated caller. Every note belongs to the caller's
     tenant and is shared by all users of that tenant; another tenant's notes do
     not exist for the caller (`404`).
+
+
+    Notes are organised by tags: one tree of tags per tenant, where a tag sits
+    at the root or under another tag. A note carries any number of tags
+    (`Note.tagIds`), and listing the notes of a tag (`GET /notes?tagId=`) lists
+    the notes that carry it or any tag below it.
 servers:
   - url: /api/v0
     description: >
@@ -41,6 +47,10 @@ tags:
     description: The authenticated caller.
   - name: notes
     description: Prototype resource, backed by the `internal/notes` module and scoped to the caller's tenant.
+  - name: tags
+    description: >
+      The tree of tags that organises the notes of the caller's tenant, owned by
+      the `internal/notes` module.
 
 paths:
   /info:
@@ -84,7 +94,20 @@ paths:
       operationId: listNotes
       tags: [notes]
       summary: List notes
-      description: Returns the notes of the caller's tenant, newest first.
+      description: >
+        Returns the notes of the caller's tenant, newest first. With `tagId`,
+        only the notes that carry that tag or any tag below it.
+      parameters:
+        - name: tagId
+          in: query
+          required: false
+          description: >
+            Id of a tag of the caller's tenant. A tag that does not exist (or was
+            deleted) matches no note: the list is empty, not an error.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 9223372036854775807
       responses:
         '200':
           description: The notes of the caller's tenant.
@@ -92,6 +115,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/NoteList'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '500':
@@ -199,6 +224,165 @@ paths:
         '500':
           $ref: '#/components/responses/Internal'
 
+  /notes/{noteId}/tags/{tagId}:
+    parameters:
+      - $ref: '#/components/parameters/NoteId'
+      - $ref: '#/components/parameters/TagId'
+    put:
+      operationId: addNoteTag
+      tags: [notes]
+      summary: Tag a note
+      description: >
+        Gives the note the tag. Idempotent: a note that carries the tag already
+        is left as it is. Both must belong to the caller's tenant. The link has
+        no representation of its own (no `GET`): read `Note.tagIds`.
+      responses:
+        '200':
+          description: The note, carrying the tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NoteOrTagNotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: removeNoteTag
+      tags: [notes]
+      summary: Untag a note
+      description: >
+        Takes the tag off the note. Idempotent: a note that does not carry the
+        tag is left as it is. Tags below the tag are not touched.
+      responses:
+        '200':
+          description: The note, without the tag.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Note'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NoteOrTagNotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /tags:
+    get:
+      operationId: listTags
+      tags: [tags]
+      summary: Get the tag tree
+      description: >
+        Returns the tag tree of the caller's tenant: the tags at the root, each
+        with its subtree, siblings in the order the users gave them. A tenant
+        holds at most 1000 tags, so the tree is never paginated.
+      responses:
+        '200':
+          description: The tag tree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Internal'
+    post:
+      operationId: createTag
+      tags: [tags]
+      summary: Create a tag
+      description: >
+        Creates a tag in the caller's tenant, at the root or under another tag,
+        placed first among its siblings or after `afterId`. A tenant that has
+        1000 tags already is refused with `422`. A name is unique among its
+        siblings, so a retried create whose first attempt went through answers
+        `409`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagInput'
+      responses:
+        '201':
+          description: The created tag.
+          headers:
+            Location:
+              description: URL of the created tag.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/TagNameTaken'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /tags/{tagId}:
+    parameters:
+      - $ref: '#/components/parameters/TagId'
+    patch:
+      operationId: updateTag
+      tags: [tags]
+      summary: Update a tag
+      description: >
+        Renames a tag, moves it with its subtree under another tag or to the
+        root (`parentId`), and/or places it among its siblings (`afterId`). An
+        absent field is left as it is; the change is applied whole or not at
+        all. A move without `afterId` puts the tag last among its new siblings.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TagPatch'
+      responses:
+        '200':
+          description: The tag as it is now, with its subtree.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Tag'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/TagNameTaken'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: deleteTag
+      tags: [tags]
+      summary: Delete a tag
+      description: >
+        Deletes a tag together with every tag below it, and takes them off the
+        notes that carried them. The notes themselves stay.
+      responses:
+        '204':
+          description: The tag and its subtree were deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
 components:
   parameters:
     NoteId:
@@ -209,6 +393,17 @@ components:
       schema:
         type: string
         maxLength: 64
+    TagId:
+      name: tagId
+      in: path
+      required: true
+      description: >
+        Id of the tag. A value that is not a positive integer names no tag and
+        is answered like an unknown id, with `404`.
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 9223372036854775807
 
   schemas:
     Info:
@@ -268,7 +463,7 @@ components:
     Note:
       type: object
       additionalProperties: false
-      required: [id, createdBy, title, body, createdAt]
+      required: [id, createdBy, title, body, createdAt, tagIds]
       properties:
         id:
           type: string
@@ -282,6 +477,13 @@ components:
         createdAt:
           type: string
           format: date-time
+        tagIds:
+          type: array
+          description: Ids of the tags the note carries (see `Tag`), ascending.
+          uniqueItems: true
+          items:
+            type: integer
+            minimum: 1
 
     NoteList:
       type: object
@@ -292,6 +494,95 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Note'
+
+    Tag:
+      type: object
+      additionalProperties: false
+      required: [id, parentId, name, children]
+      properties:
+        id:
+          type: integer
+          minimum: 1
+        parentId:
+          type: integer
+          minimum: 0
+          description: Id of the tag above it; `0` for a tag at the root.
+        name:
+          type: string
+          description: Unique among the tag's siblings, compared as written (case-sensitive).
+        children:
+          type: array
+          description: The tags directly below it, in order, each with its own subtree.
+          items:
+            $ref: '#/components/schemas/Tag'
+
+    TagList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      examples:
+        - items:
+            - id: 1
+              parentId: 0
+              name: work
+              children:
+                - {id: 3, parentId: 1, name: reports, children: []}
+            - {id: 2, parentId: 0, name: home, children: []}
+      properties:
+        items:
+          type: array
+          description: The tags at the root, in order, each with its subtree.
+          items:
+            $ref: '#/components/schemas/Tag'
+
+    TagInput:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: Leading and trailing whitespace is trimmed; must not be empty afterwards.
+          minLength: 1
+          maxLength: 100
+        parentId:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Id of the tag to create it under; `0` (or absent) for the root.
+        afterId:
+          type: integer
+          minimum: 0
+          default: 0
+          description: >
+            Id of the sibling to place it after; `0` (or absent) places it
+            first. Must be a tag directly under `parentId`.
+
+    TagPatch:
+      type: object
+      additionalProperties: false
+      description: >
+        Every field is optional; an absent one is left as it is. This is plain
+        JSON, not a merge patch: a `null` field counts as absent, so a move to
+        the root is `parentId: 0`.
+      properties:
+        name:
+          type: string
+          description: Leading and trailing whitespace is trimmed; must not be empty afterwards.
+          minLength: 1
+          maxLength: 100
+        parentId:
+          type: integer
+          minimum: 0
+          description: >
+            Id of the tag to move it under; `0` for the root. Must not be the
+            tag itself or one of its descendants.
+        afterId:
+          type: integer
+          minimum: 0
+          description: >
+            Id of the sibling, under the parent the tag ends up in, to place it
+            after; `0` places it first.
 
     Problem:
       type: object
@@ -335,13 +626,18 @@ components:
 
   responses:
     BadRequest:
-      description: The request body is not valid JSON or does not match the expected shape.
+      description: >
+        The request is malformed: the body is not one JSON object of the
+        expected shape, or a query parameter is not of its declared type.
       content:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/Problem'
     ValidationError:
-      description: The request is well-formed but breaks a business rule.
+      description: >
+        The request is well-formed but breaks a business rule. `errors` points
+        at the field that broke it; the server currently stops at the first
+        one.
       content:
         application/problem+json:
           schema:
@@ -350,6 +646,18 @@ components:
       description: >
         The caller is not authenticated: no identity was asserted, or it came
         from an untrusted peer.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    TagNameTaken:
+      description: A sibling of the tag already has that name.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NoteOrTagNotFound:
+      description: The note or the tag does not exist.
       content:
         application/problem+json:
           schema:

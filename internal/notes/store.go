@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	closuretree "github.com/go-bumbu/closure-tree"
 	"gorm.io/gorm"
 )
 
@@ -27,11 +28,13 @@ type noteRow struct {
 // TableName pins the table name, so renaming the Go type does not move the data.
 func (noteRow) TableName() string { return "notes" }
 
+// toNote maps the row onto a note without tags; withTags adds them.
 func (r noteRow) toNote() Note {
 	// UTC: Postgres hands times back in the session's time zone
 	return Note{
 		ID: r.ID, TenantID: r.TenantID, CreatedBy: r.CreatedBy,
 		Title: r.Title, Body: r.Body, CreatedAt: r.CreatedAt.UTC(),
+		TagIDs: []uint{},
 	}
 }
 
@@ -40,18 +43,36 @@ func (r noteRow) toNote() Note {
 // cross into the rest of the module.
 type store struct {
 	db *gorm.DB
+	// tree is the tag tree bound to db's read pool (readTree); writes bind one
+	// to their transaction (see newTree).
+	tree *closuretree.Tree
 }
 
-// migrate creates or updates the module's tables.
+func newStore(db *gorm.DB) (*store, error) {
+	tree, err := readTree(db)
+	if err != nil {
+		return nil, err
+	}
+	return &store{db: db, tree: tree}, nil
+}
+
+// migrate creates or updates the module's tables, the tag tree's included.
 func (s *store) migrate(ctx context.Context) error {
-	if err := s.db.WithContext(ctx).AutoMigrate(&noteRow{}); err != nil {
+	if err := s.db.WithContext(ctx).AutoMigrate(&noteRow{}, &noteTagRow{}); err != nil {
 		return fmt.Errorf("migrate notes: %w", err)
+	}
+	// closure-tree's Migrate takes no context: bind the tree to one instead.
+	migrator, err := newTree(s.db.WithContext(ctx))
+	if err != nil {
+		return err
+	}
+	if err := migrator.Migrate(); err != nil {
+		return fmt.Errorf("migrate note tags: %w", err)
 	}
 	return nil
 }
 
 func (s *store) create(ctx context.Context, n Note) error {
-	//nolint:staticcheck // S1016: an explicit mapping, not a conversion, lets Note and noteRow diverge
 	row := noteRow{
 		ID: n.ID, TenantID: n.TenantID, CreatedBy: n.CreatedBy,
 		Title: n.Title, Body: n.Body, CreatedAt: n.CreatedAt,
@@ -62,25 +83,40 @@ func (s *store) create(ctx context.Context, n Note) error {
 	return nil
 }
 
-// get returns the note with the id, only if it belongs to the tenant.
-func (s *store) get(ctx context.Context, tenantID, id string) (Note, error) {
-	var row noteRow
+// takeNote loads the note with the id into row, only if it belongs to the tenant.
+func takeNote(db *gorm.DB, tenantID, id string, row *noteRow) error {
 	// Take, not First: First adds an ORDER BY the primary key, useless for a lookup by it
-	err := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Take(&row).Error
+	err := db.Where("tenant_id = ? AND id = ?", tenantID, id).Take(row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return Note{}, ErrNotFound
+		return ErrNotFound
 	}
 	if err != nil {
-		return Note{}, fmt.Errorf("select note: %w", err)
+		return fmt.Errorf("select note: %w", err)
 	}
-	return row.toNote(), nil
+	return nil
+}
+
+// get returns the note with the id and its tags, only if it belongs to the
+// tenant. Two reads without a transaction, which on SQLite would take the one
+// writer: a tag changed between them is at worst one request stale.
+func (s *store) get(ctx context.Context, tenantID, id string) (Note, error) {
+	db := s.db.WithContext(ctx)
+	var row noteRow
+	if err := takeNote(db, tenantID, id, &row); err != nil {
+		return Note{}, err
+	}
+	out, err := withTags(db, tenantID, []noteRow{row}, []string{id})
+	if err != nil {
+		return Note{}, err
+	}
+	return out[0], nil
 }
 
 // update sets the title and body of the note with the id, only if it belongs
 // to the tenant, and returns it as stored. The write and the read back share a
 // transaction, so the note returned is the one this call wrote.
 func (s *store) update(ctx context.Context, tenantID, id string, in Input) (Note, error) {
-	var row noteRow
+	var out []Note
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&noteRow{}).
 			Where("tenant_id = ? AND id = ?", tenantID, id).
@@ -91,40 +127,53 @@ func (s *store) update(ctx context.Context, tenantID, id string, in Input) (Note
 		if res.RowsAffected == 0 {
 			return ErrNotFound
 		}
-		if err := tx.Where("tenant_id = ? AND id = ?", tenantID, id).Take(&row).Error; err != nil {
-			return fmt.Errorf("select updated note: %w", err)
+		var row noteRow
+		if err := takeNote(tx, tenantID, id, &row); err != nil {
+			return err
 		}
-		return nil
+		var err error
+		out, err = withTags(tx, tenantID, []noteRow{row}, []string{id})
+		return err
 	})
 	if err != nil {
 		return Note{}, err
 	}
-	return row.toNote(), nil
+	return out[0], nil
 }
 
-// delete removes the note with the id, only if it belongs to the tenant.
+// delete removes the note with the id and its tag links, only if it belongs to
+// the tenant.
 func (s *store) delete(ctx context.Context, tenantID, id string) error {
-	res := s.db.WithContext(ctx).Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&noteRow{})
-	if res.Error != nil {
-		return fmt.Errorf("delete note: %w", res.Error)
-	}
-	if res.RowsAffected == 0 {
-		return ErrNotFound
-	}
-	return nil
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Where("tenant_id = ? AND id = ?", tenantID, id).Delete(&noteRow{})
+		if res.Error != nil {
+			return fmt.Errorf("delete note: %w", res.Error)
+		}
+		if res.RowsAffected == 0 {
+			return ErrNotFound
+		}
+		if err := tx.Where("tenant_id = ? AND note_id = ?", tenantID, id).Delete(&noteTagRow{}).Error; err != nil {
+			return fmt.Errorf("delete note tag links: %w", err)
+		}
+		return nil
+	})
 }
 
-// list returns the tenant's notes, newest first; the id breaks ties so the
-// order is stable.
-func (s *store) list(ctx context.Context, tenantID string) ([]Note, error) {
+// list returns the tenant's notes with their tags, newest first, narrowed to
+// the notes under a tag when opts names one; the id breaks ties so the order is
+// stable. Like get, it reads without a transaction.
+func (s *store) list(ctx context.Context, tenantID string, opts ListOptions) ([]Note, error) {
+	db := s.db.WithContext(ctx)
+	notesQuery := func() *gorm.DB {
+		q := db.Model(&noteRow{}).Where("tenant_id = ?", tenantID)
+		if opts.TagID != 0 {
+			q = q.Where("id IN (?)", taggedNoteIDs(db, s.tree.ClosureTableName(), tenantID, opts.TagID))
+		}
+		return q
+	}
 	var rows []noteRow
-	err := s.db.WithContext(ctx).Where("tenant_id = ?", tenantID).Order("created_at DESC, id ASC").Find(&rows).Error
-	if err != nil {
+	if err := notesQuery().Order("created_at DESC, id ASC").Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("select notes: %w", err)
 	}
-	out := make([]Note, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, r.toNote())
-	}
-	return out, nil
+	return withTags(db, tenantID, rows, notesQuery().Select("id"))
 }

@@ -36,6 +36,7 @@ func rootCmd() *cobra.Command {
 
 	cmd.AddCommand(
 		serverCmd(),
+		seedCmd(),
 		versionCmd(),
 	)
 

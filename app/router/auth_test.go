@@ -187,7 +187,7 @@ func TestAuthConfigErrors(t *testing.T) {
 	deps := newDeps(t)
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := New(Cfg{Notes: deps.notes, Tenants: deps.tenants, Auth: tc.cfg})
+			_, err := New(Cfg{Notes: deps.notes, Tags: deps.notes, Tenants: deps.tenants, Auth: tc.cfg})
 			if err == nil {
 				t.Fatal("expected an error")
 			}
@@ -200,10 +200,13 @@ func TestAuthConfigErrors(t *testing.T) {
 
 func TestRequiredDependencies(t *testing.T) {
 	deps := newDeps(t)
-	if _, err := New(Cfg{Tenants: deps.tenants}); err == nil {
+	if _, err := New(Cfg{Tags: deps.notes, Tenants: deps.tenants}); err == nil {
 		t.Error("expected an error without Notes")
 	}
-	if _, err := New(Cfg{Notes: deps.notes}); err == nil {
+	if _, err := New(Cfg{Notes: deps.notes, Tenants: deps.tenants}); err == nil {
+		t.Error("expected an error without Tags")
+	}
+	if _, err := New(Cfg{Notes: deps.notes, Tags: deps.notes}); err == nil {
 		t.Error("expected an error without Tenants")
 	}
 }
@@ -211,7 +214,7 @@ func TestRequiredDependencies(t *testing.T) {
 // TestProvisionFailureIsInternal checks a failing tenants module is a 500
 // without leaking the cause.
 func TestProvisionFailureIsInternal(t *testing.T) {
-	h, err := New(Cfg{Notes: failingNotes{}, Tenants: failingTenants{}})
+	h, err := New(Cfg{Notes: failingNotes{}, Tags: failingNotes{}, Tenants: failingTenants{}})
 	if err != nil {
 		t.Fatal(err)
 	}
