@@ -1,6 +1,9 @@
 // Package notes is a prototype business module: it owns one business concern
 // (short text notes), its data and a small public API.
 //
+// Notes are organised by tags (tags.go): one tree of tags per tenant, stored
+// as a closure table, and any number of tags per note.
+//
 // It shows the shape every module in internal/ follows:
 //   - it knows nothing about HTTP, JSON or the app: app/ translates requests
 //     into calls to this API and maps the results back,
@@ -62,7 +65,8 @@ type Actor struct {
 var ErrNoTenant = errors.New("notes: actor has no tenant")
 
 // Note is a single note. Notes are shared by every user of their tenant;
-// CreatedBy is the id of the user who wrote it.
+// CreatedBy is the id of the user who wrote it. TagIDs are the tags it carries
+// (see Tag), ascending; never nil.
 type Note struct {
 	ID        string
 	TenantID  string
@@ -70,6 +74,7 @@ type Note struct {
 	Title     string
 	Body      string
 	CreatedAt time.Time
+	TagIDs    []uint
 }
 
 // Input holds the user-provided fields of a note.
@@ -99,7 +104,11 @@ func New(ctx context.Context, db *gorm.DB, cfg Cfg) (*Service, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
-	s := &Service{store: &store{db: db}, now: cfg.Now}
+	st, err := newStore(db)
+	if err != nil {
+		return nil, err
+	}
+	s := &Service{store: st, now: cfg.Now}
 	if err := s.store.migrate(ctx); err != nil {
 		return nil, err
 	}
@@ -128,6 +137,7 @@ func (s *Service) Create(ctx context.Context, a Actor, in Input) (Note, error) {
 		// microseconds: the finest precision every supported database keeps,
 		// so the returned note equals the one read back later
 		CreatedAt: s.now().UTC().Truncate(time.Microsecond),
+		TagIDs:    []uint{},
 	}
 	if err := s.store.create(ctx, n); err != nil {
 		return Note{}, err
@@ -159,8 +169,9 @@ func (s *Service) Update(ctx context.Context, a Actor, id string, in Input) (Not
 	return s.store.update(ctx, a.TenantID, id, in)
 }
 
-// Delete removes the note with the given id from the actor's tenant, or
-// returns ErrNotFound. Like Update, any user of the tenant may delete it.
+// Delete removes the note with the given id from the actor's tenant, with its
+// tag links, or returns ErrNotFound. Like Update, any user of the tenant may
+// delete it.
 func (s *Service) Delete(ctx context.Context, a Actor, id string) error {
 	if a.TenantID == "" {
 		return ErrNoTenant
@@ -168,12 +179,15 @@ func (s *Service) Delete(ctx context.Context, a Actor, id string) error {
 	return s.store.delete(ctx, a.TenantID, id)
 }
 
-// List returns the notes of the actor's tenant, newest first.
-func (s *Service) List(ctx context.Context, a Actor) ([]Note, error) {
+// List returns the notes of the actor's tenant, newest first, narrowed by opts.
+func (s *Service) List(ctx context.Context, a Actor, opts ListOptions) ([]Note, error) {
 	if a.TenantID == "" {
 		return nil, ErrNoTenant
 	}
-	return s.store.list(ctx, a.TenantID)
+	if opts.TagID != 0 && !validTagID(opts.TagID) {
+		return []Note{}, nil // no tag has that id, so no note is under it
+	}
+	return s.store.list(ctx, a.TenantID, opts)
 }
 
 func validate(in Input) error {

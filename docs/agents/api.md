@@ -14,6 +14,25 @@ See [architecture.md](architecture.md) for the tiers, [auth-and-tenancy.md](auth
 | `GET /api/v0/notes/{noteId}` | protected | one note; another tenant's note is `404` |
 | `PUT /api/v0/notes/{noteId}` | protected | replace a note's title and body; any member of the tenant may edit |
 | `DELETE /api/v0/notes/{noteId}` | protected | delete a note; `204`; any member of the tenant may delete |
+| `PUT /api/v0/notes/{noteId}/tags/{tagId}` | protected | give the note the tag; idempotent; answers the note |
+| `DELETE /api/v0/notes/{noteId}/tags/{tagId}` | protected | take the tag off the note; idempotent; answers the note |
+| `GET /api/v0/tags` | protected | the tenant's tag tree (`{items}`: the roots, each with its `children`) |
+| `POST /api/v0/tags` | protected | create a tag (`parentId` 0 = root, `afterId` 0 = first); `201` + `Location`; `409` for a sibling's name |
+| `PATCH /api/v0/tags/{tagId}` | protected | rename / move (`parentId`) / reorder (`afterId`); absent fields untouched; applied whole or not at all |
+| `DELETE /api/v0/tags/{tagId}` | protected | delete the tag and its subtree, taking them off the notes; `204` |
+
+`GET /notes?tagId={id}` narrows the list to the notes that carry the tag or any tag below it; an unknown tag is an
+empty list, a malformed one (not a positive int64, or given twice) `400`. Every `Note` carries `tagIds` (ascending).
+Tag ids are integers (closure-tree owns them, up to int64); note ids stay 16 hex chars. A tag id in a path that is
+not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsPerTenant` (1000) tags, which is why
+`GET /tags` is not paginated.
+
+- **Relationship toggles** are `PUT` / `DELETE /notes/{noteId}/tags/{tagId}`: idempotent, `200` with the parent
+  (the note), no `201` and no `GET` of the link — read `Note.tagIds`.
+- **`0` is the root and "first"** in `parentId` / `afterId` (closure-tree's own convention, integer ids only). A
+  `null` field of a `TagPatch` counts as absent; the spec says so, it is not a merge patch.
+- **A missing or blank required text field is `422`** with its pointer, as `NoteInput.title` was: the module owns
+  the rule, so the UI gets a field to mark. `400` stays for a body that is not one JSON object of the right shape.
 
 ## Invariants
 
@@ -43,8 +62,10 @@ See [architecture.md](architecture.md) for the tiers, [auth-and-tenancy.md](auth
 |---|---|---|
 | body not one valid JSON object, unknown field, over 1 MiB (`decodeJSON`) | 400 | `bad_request` |
 | guard: no / untrusted identity, or a `tenants.ValidationError` | 401 | `unauthorized` |
-| module `ErrNotFound` | 404 | `not_found` |
-| module `*ValidationError` (`WriteValidation`, pointer `/<field>`) | 422 | `validation_error` |
+| module `ErrNotFound`, `ErrTagNotFound`, a tag id that is not a positive integer | 404 | `not_found` |
+| module `ErrTagExists` (a sibling already has the name) | 409 | `conflict` |
+| module `ErrTooManyTags` (a create past `MaxTagsPerTenant`) | 422 | `validation_error`, no field |
+| module `*ValidationError` (`WriteValidation`, pointer `/<field>`; the first failing field only, for now) | 422 | `validation_error` |
 | anything else, incl. a protected handler without identity | 500 | `internal` |
 
 ## Adding or changing an endpoint
@@ -58,10 +79,14 @@ See [architecture.md](architecture.md) for the tiers, [auth-and-tenancy.md](auth
    router).
 7. Update `webui/src/lib/api/types.ts` and `api.ts` if the UI uses it — [web-ui.md](web-ui.md).
 
+The mapping of every `internal/notes` error lives once, in `handlers/noteserrors.go` (`notesErrors`), for the notes
+and the tags handler alike.
+
 ## Go client (`libs/client`)
 
 Hand-written against the spec, stdlib only, shares no types with the server. API failures come back as
-`*client.Problem`, matching `client.ErrNotFound`, `ErrUnauthorized` and `ErrValidation` with `errors.Is`.
+`*client.Problem`, matching `client.ErrNotFound`, `ErrUnauthorized`, `ErrValidation` and `ErrConflict` with
+`errors.Is`.
 `WithHeader` lets development code play the trusted proxy.
 
 ## Versioning

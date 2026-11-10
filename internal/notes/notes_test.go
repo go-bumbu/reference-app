@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestCreateAndGet(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
-		if got != created {
+		if !reflect.DeepEqual(got, created) {
 			t.Errorf("get: got %+v, want %+v", got, created)
 		}
 	})
@@ -108,7 +109,7 @@ func TestNotesSurviveRestart(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get after restart: %v", err)
 		}
-		if got != created {
+		if !reflect.DeepEqual(got, created) {
 			t.Errorf("got %+v, want %+v", got, created)
 		}
 	})
@@ -140,7 +141,7 @@ func TestUpdate(t *testing.T) {
 		}
 		want := created
 		want.Title, want.Body = "final", "new"
-		if updated != want {
+		if !reflect.DeepEqual(updated, want) {
 			t.Errorf("update: got %+v, want %+v (author and creation time unchanged)", updated, want)
 		}
 
@@ -148,7 +149,7 @@ func TestUpdate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("get: %v", err)
 		}
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Errorf("get after update: got %+v, want %+v", got, want)
 		}
 
@@ -205,7 +206,7 @@ func TestDelete(t *testing.T) {
 		if err := svc.Delete(ctx, acme, gone.ID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("second delete: got %v, want ErrNotFound", err)
 		}
-		list, err := svc.List(ctx, acme)
+		list, err := svc.List(ctx, acme, ListOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -239,7 +240,7 @@ func TestCreateValidation(t *testing.T) {
 				}
 			})
 		}
-		list, err := svc.List(context.Background(), acme)
+		list, err := svc.List(context.Background(), acme, ListOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -274,7 +275,7 @@ func TestListNewestFirst(t *testing.T) {
 		ctx := context.Background()
 		svc := newService(t, db, Cfg{Now: fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))})
 
-		empty, err := svc.List(ctx, acme)
+		empty, err := svc.List(ctx, acme, ListOptions{})
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -287,7 +288,7 @@ func TestListNewestFirst(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		list, err := svc.List(ctx, acme)
+		list, err := svc.List(ctx, acme, ListOptions{})
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
@@ -315,7 +316,7 @@ func TestCancelledContext(t *testing.T) {
 		if _, err := svc.Get(ctx, acme, "x"); !errors.Is(err, context.Canceled) {
 			t.Errorf("get: got %v, want context.Canceled", err)
 		}
-		if _, err := svc.List(ctx, acme); !errors.Is(err, context.Canceled) {
+		if _, err := svc.List(ctx, acme, ListOptions{}); !errors.Is(err, context.Canceled) {
 			t.Errorf("list: got %v, want context.Canceled", err)
 		}
 		if _, err := svc.Update(ctx, acme, "x", Input{Title: "x"}); !errors.Is(err, context.Canceled) {
@@ -353,7 +354,7 @@ func TestTenantIsolation(t *testing.T) {
 		if _, err := svc.Get(ctx, globex, created.ID); !errors.Is(err, ErrNotFound) {
 			t.Errorf("get from another tenant: got %v, want ErrNotFound", err)
 		}
-		list, err := svc.List(ctx, globex)
+		list, err := svc.List(ctx, globex, ListOptions{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -396,7 +397,7 @@ func TestNoTenantFailsClosed(t *testing.T) {
 		if _, err := svc.Get(ctx, none, "x"); !errors.Is(err, ErrNoTenant) {
 			t.Errorf("get: got %v, want ErrNoTenant", err)
 		}
-		if _, err := svc.List(ctx, none); !errors.Is(err, ErrNoTenant) {
+		if _, err := svc.List(ctx, none, ListOptions{}); !errors.Is(err, ErrNoTenant) {
 			t.Errorf("list: got %v, want ErrNoTenant", err)
 		}
 		if _, err := svc.Update(ctx, none, "x", Input{Title: "x"}); !errors.Is(err, ErrNoTenant) {

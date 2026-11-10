@@ -34,14 +34,32 @@ func (f *fakeServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, http.StatusOK, `{"userId":"u1","subject":"`+r.Header.Get("Remote-User")+`","tenantId":"t1","tenant":"acme"}`)
 	case "GET /base/api/v0/notes":
-		writeJSON(w, http.StatusOK, `{"items":[{"id":"n1","createdBy":"u1","title":"hi","body":"","createdAt":"2026-01-02T03:04:05Z"}]}`)
+		if r.URL.RawQuery != "" && r.URL.RawQuery != "tagId=7" {
+			f.t.Errorf("unexpected query %q", r.URL.RawQuery)
+		}
+		writeJSON(w, http.StatusOK, `{"items":[{"id":"n1","createdBy":"u1","title":"hi","body":"","createdAt":"2026-01-02T03:04:05Z","tagIds":[]}]}`)
 	case "POST /base/api/v0/notes":
-		writeJSON(w, http.StatusCreated, `{"id":"n2","createdBy":"u1","title":"new","body":"text","createdAt":"2026-01-02T03:04:05Z"}`)
+		writeJSON(w, http.StatusCreated, `{"id":"n2","createdBy":"u1","title":"new","body":"text","createdAt":"2026-01-02T03:04:05Z","tagIds":[]}`)
 	case "GET /base/api/v0/notes/n1":
-		writeJSON(w, http.StatusOK, `{"id":"n1","createdBy":"u1","title":"hi","body":"","createdAt":"2026-01-02T03:04:05Z"}`)
+		writeJSON(w, http.StatusOK, `{"id":"n1","createdBy":"u1","title":"hi","body":"","createdAt":"2026-01-02T03:04:05Z","tagIds":[]}`)
 	case "PUT /base/api/v0/notes/n1":
-		writeJSON(w, http.StatusOK, `{"id":"n1","createdBy":"u1","title":"edited","body":"more","createdAt":"2026-01-02T03:04:05Z"}`)
+		writeJSON(w, http.StatusOK, `{"id":"n1","createdBy":"u1","title":"edited","body":"more","createdAt":"2026-01-02T03:04:05Z","tagIds":[]}`)
 	case "DELETE /base/api/v0/notes/n1":
+		w.WriteHeader(http.StatusNoContent)
+	case "PUT /base/api/v0/notes/a%2Fb/tags/7", "DELETE /base/api/v0/notes/a%2Fb/tags/7":
+		writeJSON(w, http.StatusOK, `{"id":"a/b","createdBy":"u1","title":"hi","body":"","createdAt":"2026-01-02T03:04:05Z","tagIds":[7]}`)
+	case "GET /base/api/v0/tags":
+		writeJSON(w, http.StatusOK, `{"items":[{"id":1,"parentId":0,"name":"work","children":[`+
+			`{"id":2,"parentId":1,"name":"reports","children":[]}]}]}`)
+	case "POST /base/api/v0/tags":
+		if strings.Contains(f.body, `"taken"`) {
+			writeProblem(w, http.StatusConflict, "conflict", "a sibling tag already has this name")
+			return
+		}
+		writeJSON(w, http.StatusCreated, `{"id":3,"parentId":1,"name":"q1","children":[]}`)
+	case "PATCH /base/api/v0/tags/3":
+		writeJSON(w, http.StatusOK, `{"id":3,"parentId":0,"name":"q2","children":[]}`)
+	case "DELETE /base/api/v0/tags/3":
 		w.WriteHeader(http.StatusNoContent)
 	case "GET /base/api/v0/notes/a%2Fb", "DELETE /base/api/v0/notes/a%2Fb":
 		writeProblem(w, http.StatusNotFound, "not_found", "note a/b not found")
@@ -137,9 +155,18 @@ func TestNotes(t *testing.T) {
 	ctx := context.Background()
 	created := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 
-	list, err := c.ListNotes(ctx)
+	list, err := c.ListNotes(ctx, ListNotesOptions{})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if fake.last.URL.RawQuery != "" {
+		t.Errorf("list without a tag sent the query %q", fake.last.URL.RawQuery)
+	}
+	if _, err := c.ListNotes(ctx, ListNotesOptions{Tag: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.last.URL.RawQuery != "tagId=7" {
+		t.Errorf("list by tag: got query %q, want tagId=7", fake.last.URL.RawQuery)
 	}
 	if len(list) != 1 || list[0].ID != "n1" || !list[0].CreatedAt.Equal(created) {
 		t.Errorf("list: got %+v", list)
@@ -183,6 +210,68 @@ func TestNotes(t *testing.T) {
 	}
 	if err := c.DeleteNote(ctx, "a/b"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("delete missing: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestTags(t *testing.T) {
+	c, fake := newTestClient(t)
+	ctx := context.Background()
+
+	tree, err := c.Tags(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tree) != 1 || tree[0].Name != "work" || len(tree[0].Children) != 1 || tree[0].Children[0].ParentID != 1 {
+		t.Errorf("tags: got %+v", tree)
+	}
+
+	after := uint(2)
+	tag, err := c.CreateTag(ctx, TagInput{Name: "q1", ParentID: 1, AfterID: &after})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.ID != 3 || tag.ParentID != 1 {
+		t.Errorf("create: got %+v", tag)
+	}
+	if fake.body != `{"name":"q1","parentId":1,"afterId":2}` {
+		t.Errorf("create body: got %s", fake.body)
+	}
+	if _, err := c.CreateTag(ctx, TagInput{Name: "taken"}); !errors.Is(err, ErrConflict) {
+		t.Errorf("create a taken name: got %v, want ErrConflict", err)
+	}
+	if fake.body != `{"name":"taken"}` {
+		t.Errorf("create at the root body: got %s", fake.body)
+	}
+
+	name, root := "q2", uint(0)
+	tag, err = c.UpdateTag(ctx, 3, TagPatch{Name: &name, ParentID: &root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.Name != "q2" || tag.ParentID != 0 {
+		t.Errorf("update: got %+v", tag)
+	}
+	// a pointer to 0 is sent: it moves the tag to the root
+	if fake.body != `{"name":"q2","parentId":0}` {
+		t.Errorf("update body: got %s", fake.body)
+	}
+
+	if err := c.DeleteTag(ctx, 3); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+
+	n, err := c.AddNoteTag(ctx, "a/b", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.TagIDs) != 1 || n.TagIDs[0] != 7 {
+		t.Errorf("add note tag: got %+v", n)
+	}
+	if _, err := c.RemoveNoteTag(ctx, "a/b", 7); err != nil {
+		t.Fatal(err)
+	}
+	if fake.last.Method != http.MethodDelete {
+		t.Errorf("remove note tag: sent %s", fake.last.Method)
 	}
 }
 

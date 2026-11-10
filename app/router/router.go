@@ -25,6 +25,9 @@ type Cfg struct {
 	Logger *slog.Logger
 	// Notes is the notes module (internal/notes); required.
 	Notes handlers.NotesService
+	// Tags is the notes module's tag tree (internal/notes, the same Service as
+	// Notes); required.
+	Tags handlers.TagsService
 	// Tenants resolves the authenticated identity into tenant and user IDs
 	// (internal/tenants); required.
 	Tenants TenantProvisioner
@@ -49,6 +52,9 @@ func New(cfg Cfg) (http.Handler, error) {
 	if cfg.Notes == nil {
 		return nil, errors.New("router: Notes is required")
 	}
+	if cfg.Tags == nil {
+		return nil, errors.New("router: Tags is required")
+	}
 	if cfg.Tenants == nil {
 		return nil, errors.New("router: Tenants is required")
 	}
@@ -72,7 +78,7 @@ func New(cfg Cfg) (http.Handler, error) {
 		return prometheus.PromMiddleware(handler)
 	})
 
-	attachApiV0(r, cfg.Notes, guard, problems, logger)
+	attachApiV0(r, cfg.Notes, cfg.Tags, guard, problems, logger)
 	if cfg.UI != nil {
 		attachUI(r, cfg.UI)
 	}

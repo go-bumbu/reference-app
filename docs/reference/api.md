@@ -39,6 +39,10 @@ app such a file once the spec grows):
 - Lists return an envelope (`{items: [...]}`), so fields can be added later. **Paginate only a list that can grow
   large.** Use a `limit` with a default and a cap, and an opaque `next_cursor` that is valid only for the same
   sort. An unknown cursor is a `400`. A list that the server already keeps small needs no cursor.
+- A relationship between two resources is toggled with `PUT` / `DELETE /parents/{id}/children/{childId}`: both
+  idempotent, both `200` with the parent. The link has no `GET` of its own. *(reference-app: note tags)*
+- A sentinel `0` ("the root", "first") is acceptable for integer ids a library owns (closure-tree's tags); give
+  string-id resources a nullable field instead. *(reference-app)*
 - A resource of another tenant is a `404`, never a `403`. `403` means "you may not do this", and never reveals that
   a resource exists.
 

@@ -141,6 +141,7 @@ func newMainHandler(cfg AppCfg, db *gorm.DB, l *slog.Logger) (http.Handler, erro
 	h, err := router.New(router.Cfg{
 		Logger:     l,
 		Notes:      notesSvc,
+		Tags:       notesSvc,
 		Tenants:    tenantsSvc,
 		Auth:       authCfg,
 		UI:         ui,

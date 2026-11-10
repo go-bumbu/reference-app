@@ -16,6 +16,8 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 | Background workers (schedulers, task runners) | Not implemented | the shutdown hook in `runServer` is the place to stop them |
 | Request logging + Prometheus request metrics | Implemented | `libs/middleware/{log,prometheus}`, mounted in `router.New` |
 | REST API `/api/v0`: `info`, `me`, notes list / create / get / update / delete | Implemented | `app/router/api_v0.go` — [api.md](api.md) |
+| Tags: one tree per tenant, any number per note, notes listed by tag (subtree included) | Implemented | `internal/notes/tags.go`, `tagstore.go` (closure table via `go-bumbu/closure-tree`); `/tags`, `/notes/{id}/tags/{tagId}`, `GET /notes?tag=` |
+| Tag groups (several trees, codex's media) and tag facets / counts | Not implemented, by design | one tree of tags for notes; the sidebar is a plain tree, no per-tag counts |
 | Notes list pagination | Not implemented | `List` returns the whole tenant in one page; the UI's search filters on the client |
 | RFC 9457 problem+json errors, masked in production | Implemented | `go-bumbu/http/problemjson`; `Env.Production` |
 | OpenAPI contract tests + spectral lint | Implemented | `app/router/openapi_test.go`, `make spec-lint` |
@@ -33,7 +35,11 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 | Web UI search (notes, client-side `?q=` filter) | Implemented | `webui/src/App.vue`, `views/NotesView.vue` |
 | Web UI settings: theme, light / dark / auto mode | Implemented, per device | `webui/src/views/settings/`; kept in `localStorage`, no user settings API |
 | Web UI settings: Jobs | Placeholder | sample jobs whose Run now only toasts; needs the background workers below |
-| Tags (sidebar) | Placeholder | `webui/src/components/AppNav.vue` shows a fixed list; no API or module support yet |
+| Web UI tags: sidebar tree, drag a note onto a tag, tag editor dialog | Implemented | `webui/src/components/AppNav.vue`, `components/tags/` — [web-ui.md](web-ui.md); nothing about tags lives in the settings |
+| Moving tags without a pointer drag | Partial | "Move to…" in the editor nests a tag anywhere (keyboard, touch); reordering among siblings is drag only |
+| More than 1000 tags per tenant | Not implemented, by design | `notes.MaxTagsPerTenant` keeps `GET /tags` one unpaginated response |
+| A 422 listing every failing field | Not implemented | `notes.ValidationError` holds one field; the spec says the server stops at the first |
+| Case-insensitive tag names, a unique constraint on sibling names | Not implemented | names are unique among siblings as written; the check runs in the transaction, not as a constraint (Postgres can race two renames) |
 | Build metadata (`version`, `GET /info`) | Implemented | `app/metainfo`, set by goreleaser `-ldflags` |
 | Release: zips, debs, container image, UI zip | Implemented | goreleaser — [releasing.md](releasing.md) |
 | docker compose setup | Not implemented | `TODO.md` → "pending" |

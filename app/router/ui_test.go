@@ -13,7 +13,7 @@ func TestUIIsTheCatchAllOutsideTheAPI(t *testing.T) {
 	ui := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ui"))
 	})
-	h, err := New(Cfg{Notes: deps.notes, Tenants: deps.tenants, UI: ui})
+	h, err := New(Cfg{Notes: deps.notes, Tags: deps.notes, Tenants: deps.tenants, UI: ui})
 	if err != nil {
 		t.Fatal(err)
 	}

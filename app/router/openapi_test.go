@@ -92,7 +92,7 @@ func (d testDeps) actorFor(t *testing.T, tenant, subject string) notes.Actor {
 
 func newTestRouter(t *testing.T, d testDeps, production bool, auth AuthCfg) *mux.Router {
 	t.Helper()
-	h, err := New(Cfg{Notes: d.notes, Tenants: d.tenants, Production: production, Auth: auth})
+	h, err := New(Cfg{Notes: d.notes, Tags: d.notes, Tenants: d.tenants, Production: production, Auth: auth})
 	if err != nil {
 		t.Fatalf("router.New: %v", err)
 	}
@@ -181,7 +181,32 @@ func TestOpenAPIResponseContract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			ctx := context.Background()
+			work, err := deps.notes.CreateTag(ctx, admin, notes.TagInput{Name: "work"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			reports, err := deps.notes.CreateTag(ctx, admin, notes.TagInput{Name: "reports", ParentID: work.ID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			doomedTag, err := deps.notes.CreateTag(ctx, admin, notes.TagInput{Name: "doomed"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignTag, err := deps.notes.CreateTag(ctx, other, notes.TagInput{Name: "foreign"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := deps.notes.AddNoteTag(ctx, admin, existing.ID, reports.ID); err != nil {
+				t.Fatal(err)
+			}
 			r := newTestRouter(t, deps, production, AuthCfg{Method: AuthNone})
+			const tooBig = "9223372036854775808" // 1<<63: past every database's integer
+			tagPath := func(id uint) string { return "/tags/" + strconv.FormatUint(uint64(id), 10) }
+			noteTagPath := func(noteID string, tagID uint) string {
+				return "/notes/" + noteID + "/tags/" + strconv.FormatUint(uint64(tagID), 10)
+			}
 
 			cases := []contractCase{
 				{name: "info", method: http.MethodGet, path: "/info", specPath: "/info", wantStatus: http.StatusOK},
@@ -219,6 +244,94 @@ func TestOpenAPIResponseContract(t *testing.T) {
 					specPath: "/notes/{noteId}", wantStatus: http.StatusNotFound},
 				{name: "delete note of another tenant", method: http.MethodDelete, path: "/notes/" + foreign.ID,
 					specPath: "/notes/{noteId}", wantStatus: http.StatusNotFound},
+
+				// the notes of a tag
+				{name: "list notes of a tag", method: http.MethodGet, path: "/notes?tagId=" + strconv.FormatUint(uint64(work.ID), 10),
+					specPath: "/notes", wantStatus: http.StatusOK},
+				{name: "list notes of a missing tag", method: http.MethodGet, path: "/notes?tagId=99999", specPath: "/notes",
+					wantStatus: http.StatusOK},
+				{name: "list notes of a malformed tag", method: http.MethodGet, path: "/notes?tagId=abc", specPath: "/notes",
+					wantStatus: http.StatusBadRequest},
+				{name: "list notes of tag 0", method: http.MethodGet, path: "/notes?tagId=0", specPath: "/notes",
+					wantStatus: http.StatusBadRequest},
+				{name: "list notes of two tags", method: http.MethodGet, path: "/notes?tagId=1&tagId=2", specPath: "/notes",
+					wantStatus: http.StatusBadRequest},
+				{name: "list notes of a tag id past int64", method: http.MethodGet, path: "/notes?tagId=" + tooBig,
+					specPath: "/notes", wantStatus: http.StatusBadRequest},
+				{name: "tag a note", method: http.MethodPut, path: noteTagPath(existing.ID, work.ID),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusOK},
+				{name: "tag a note again", method: http.MethodPut, path: noteTagPath(existing.ID, work.ID),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusOK},
+				{name: "tag a missing note", method: http.MethodPut, path: noteTagPath("missing", work.ID),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusNotFound},
+				{name: "tag a note with a missing tag", method: http.MethodPut, path: noteTagPath(existing.ID, 99999),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusNotFound},
+				{name: "tag a note with a malformed tag", method: http.MethodPut, path: "/notes/" + existing.ID + "/tags/abc",
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusNotFound},
+				{name: "tag a note with another tenant's tag", method: http.MethodPut,
+					path: noteTagPath(existing.ID, foreignTag.ID), specPath: "/notes/{noteId}/tags/{tagId}",
+					wantStatus: http.StatusNotFound},
+				{name: "untag a note", method: http.MethodDelete, path: noteTagPath(existing.ID, work.ID),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusOK},
+				{name: "untag a missing note", method: http.MethodDelete, path: noteTagPath("missing", work.ID),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusNotFound},
+				{name: "untag a missing tag", method: http.MethodDelete, path: noteTagPath(existing.ID, 99999),
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusNotFound},
+				{name: "untag a tag id past int64", method: http.MethodDelete, path: "/notes/" + existing.ID + "/tags/" + tooBig,
+					specPath: "/notes/{noteId}/tags/{tagId}", wantStatus: http.StatusNotFound},
+
+				// the tag tree
+				{name: "list tags", method: http.MethodGet, path: "/tags", specPath: "/tags", wantStatus: http.StatusOK},
+				{name: "create tag", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":"home"}`, wantStatus: http.StatusCreated},
+				{name: "create child tag after a sibling", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body:       fmt.Sprintf(`{"name":"q1","parentId":%d,"afterId":%d}`, work.ID, reports.ID),
+					wantStatus: http.StatusCreated},
+				{name: "create tag malformed json", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":`, wantStatus: http.StatusBadRequest},
+				{name: "create tag negative parent", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":"x","parentId":-1}`, wantStatus: http.StatusBadRequest},
+				{name: "create tag empty name", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":" "}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "create tag without a name", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"parentId":0}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "create tag under a parent id past int64", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":"x","parentId":` + tooBig + `}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "create tag after a tag of another parent", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: fmt.Sprintf(`{"name":"x","afterId":%d}`, reports.ID), wantStatus: http.StatusUnprocessableEntity},
+				{name: "create tag under a missing parent", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":"x","parentId":99999}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "create tag with a sibling's name", method: http.MethodPost, path: "/tags", specPath: "/tags",
+					body: `{"name":"work"}`, wantStatus: http.StatusConflict},
+				{name: "rename tag", method: http.MethodPatch, path: tagPath(reports.ID), specPath: "/tags/{tagId}",
+					body: `{"name":"papers"}`, wantStatus: http.StatusOK},
+				{name: "move tag to the root", method: http.MethodPatch, path: tagPath(reports.ID), specPath: "/tags/{tagId}",
+					body: `{"parentId":0,"afterId":0}`, wantStatus: http.StatusOK},
+				{name: "empty tag patch", method: http.MethodPatch, path: tagPath(reports.ID), specPath: "/tags/{tagId}",
+					body: `{}`, wantStatus: http.StatusOK},
+				{name: "move tag under itself", method: http.MethodPatch, path: tagPath(work.ID), specPath: "/tags/{tagId}",
+					body: fmt.Sprintf(`{"parentId":%d}`, work.ID), wantStatus: http.StatusUnprocessableEntity},
+				{name: "move tag after a tag of another parent", method: http.MethodPatch, path: tagPath(work.ID),
+					specPath: "/tags/{tagId}", body: fmt.Sprintf(`{"afterId":%d}`, childTag(t, deps, admin, work.ID)),
+					wantStatus: http.StatusUnprocessableEntity},
+				{name: "update tag id past int64", method: http.MethodPatch, path: "/tags/" + tooBig, specPath: "/tags/{tagId}",
+					body: `{"name":"x"}`, wantStatus: http.StatusNotFound},
+				{name: "rename tag to a sibling's name", method: http.MethodPatch, path: tagPath(reports.ID),
+					specPath: "/tags/{tagId}", body: `{"name":"work"}`, wantStatus: http.StatusConflict},
+				{name: "update tag malformed json", method: http.MethodPatch, path: tagPath(work.ID), specPath: "/tags/{tagId}",
+					body: `{"name":`, wantStatus: http.StatusBadRequest},
+				{name: "update missing tag", method: http.MethodPatch, path: tagPath(99999), specPath: "/tags/{tagId}",
+					body: `{"name":"x"}`, wantStatus: http.StatusNotFound},
+				{name: "update malformed tag id", method: http.MethodPatch, path: "/tags/abc", specPath: "/tags/{tagId}",
+					body: `{"name":"x"}`, wantStatus: http.StatusNotFound},
+				{name: "update tag of another tenant", method: http.MethodPatch, path: tagPath(foreignTag.ID),
+					specPath: "/tags/{tagId}", body: `{"name":"x"}`, wantStatus: http.StatusNotFound},
+				{name: "delete tag", method: http.MethodDelete, path: tagPath(doomedTag.ID), specPath: "/tags/{tagId}",
+					wantStatus: http.StatusNoContent},
+				{name: "delete missing tag", method: http.MethodDelete, path: tagPath(doomedTag.ID), specPath: "/tags/{tagId}",
+					wantStatus: http.StatusNotFound},
+				{name: "delete malformed tag id", method: http.MethodDelete, path: "/tags/abc", specPath: "/tags/{tagId}",
+					wantStatus: http.StatusNotFound},
 			}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
@@ -233,21 +346,63 @@ func TestOpenAPIResponseContract(t *testing.T) {
 	}
 }
 
+// childTag creates a tag under parent and returns its id: a tag that is not a
+// sibling of the root tags, for an afterId the API must refuse.
+func childTag(t *testing.T, d testDeps, a notes.Actor, parent uint) uint {
+	t.Helper()
+	tag, err := d.notes.CreateTag(context.Background(), a, notes.TagInput{Name: "child of " + strconv.Itoa(int(parent)), ParentID: parent})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tag.ID
+}
+
+// TestCreateTagLocation checks the Location the spec documents on 201 names
+// the created tag.
+func TestCreateTagLocation(t *testing.T) {
+	r := newTestRouter(t, newDeps(t), false, AuthCfg{Method: AuthNone})
+	rec := serve(r, http.MethodPost, "/tags", `{"name":"work"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status: got %d, want 201; body: %s", rec.Code, rec.Body.String())
+	}
+	var tag struct {
+		ID uint `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &tag); err != nil {
+		t.Fatal(err)
+	}
+	if want := apiV0MountPrefix + "/tags/" + strconv.FormatUint(uint64(tag.ID), 10); rec.Header().Get("Location") != want {
+		t.Errorf("Location: got %q, want %q", rec.Header().Get("Location"), want)
+	}
+}
+
 // TestOpenAPIInternalErrorContract covers the documented 500, which a healthy
 // module never produces, with a failing fake.
 func TestOpenAPIInternalErrorContract(t *testing.T) {
 	doc := loadSpec(t)
-	h, err := New(Cfg{Notes: failingNotes{}, Tenants: fixedTenants{}})
+	h, err := New(Cfg{Notes: failingNotes{}, Tags: failingNotes{}, Tenants: fixedTenants{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := serve(h, http.MethodGet, "/notes", "")
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("status: got %d, want 500", rec.Code)
-	}
-	validateResponse(t, doc, http.MethodGet, "/notes", rec)
-	if strings.Contains(rec.Body.String(), "db down") {
-		t.Error("the internal error leaked to the client")
+	for _, tc := range []contractCase{
+		{method: http.MethodGet, path: "/notes", specPath: "/notes"},
+		{method: http.MethodPut, path: "/notes/x/tags/1", specPath: "/notes/{noteId}/tags/{tagId}"},
+		{method: http.MethodDelete, path: "/notes/x/tags/1", specPath: "/notes/{noteId}/tags/{tagId}"},
+		{method: http.MethodGet, path: "/tags", specPath: "/tags"},
+		{method: http.MethodPost, path: "/tags", specPath: "/tags", body: `{"name":"x"}`},
+		{method: http.MethodPatch, path: "/tags/1", specPath: "/tags/{tagId}", body: `{"name":"x"}`},
+		{method: http.MethodDelete, path: "/tags/1", specPath: "/tags/{tagId}"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			rec := serve(h, tc.method, tc.path, tc.body)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status: got %d, want 500", rec.Code)
+			}
+			validateResponse(t, doc, tc.method, tc.specPath, rec)
+			if strings.Contains(rec.Body.String(), "db down") {
+				t.Error("the internal error leaked to the client")
+			}
+		})
 	}
 }
 
@@ -336,6 +491,12 @@ func TestOpenAPIUnauthorizedContract(t *testing.T) {
 		{method: http.MethodGet, path: "/notes/x", specPath: "/notes/{noteId}"},
 		{method: http.MethodPut, path: "/notes/x", specPath: "/notes/{noteId}", body: `{"title":"x"}`},
 		{method: http.MethodDelete, path: "/notes/x", specPath: "/notes/{noteId}"},
+		{method: http.MethodPut, path: "/notes/x/tags/1", specPath: "/notes/{noteId}/tags/{tagId}"},
+		{method: http.MethodDelete, path: "/notes/x/tags/1", specPath: "/notes/{noteId}/tags/{tagId}"},
+		{method: http.MethodGet, path: "/tags", specPath: "/tags"},
+		{method: http.MethodPost, path: "/tags", specPath: "/tags", body: `{"name":"x"}`},
+		{method: http.MethodPatch, path: "/tags/1", specPath: "/tags/{tagId}", body: `{"name":"x"}`},
+		{method: http.MethodDelete, path: "/tags/1", specPath: "/tags/{tagId}"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
@@ -350,7 +511,7 @@ func TestOpenAPIUnauthorizedContract(t *testing.T) {
 
 type failingNotes struct{}
 
-func (failingNotes) List(context.Context, notes.Actor) ([]notes.Note, error) {
+func (failingNotes) List(context.Context, notes.Actor, notes.ListOptions) ([]notes.Note, error) {
 	return nil, errors.New("db down")
 }
 
@@ -367,6 +528,30 @@ func (failingNotes) Update(context.Context, notes.Actor, string, notes.Input) (n
 }
 
 func (failingNotes) Delete(context.Context, notes.Actor, string) error {
+	return errors.New("db down")
+}
+
+func (failingNotes) AddNoteTag(context.Context, notes.Actor, string, uint) (notes.Note, error) {
+	return notes.Note{}, errors.New("db down")
+}
+
+func (failingNotes) RemoveNoteTag(context.Context, notes.Actor, string, uint) (notes.Note, error) {
+	return notes.Note{}, errors.New("db down")
+}
+
+func (failingNotes) Tags(context.Context, notes.Actor) ([]notes.Tag, error) {
+	return nil, errors.New("db down")
+}
+
+func (failingNotes) CreateTag(context.Context, notes.Actor, notes.TagInput) (notes.Tag, error) {
+	return notes.Tag{}, errors.New("db down")
+}
+
+func (failingNotes) UpdateTag(context.Context, notes.Actor, uint, notes.TagPatch) (notes.Tag, error) {
+	return notes.Tag{}, errors.New("db down")
+}
+
+func (failingNotes) DeleteTag(context.Context, notes.Actor, uint) error {
 	return errors.New("db down")
 }
 

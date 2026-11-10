@@ -26,7 +26,8 @@ const created = {
     createdBy: 'u1',
     title: 'hello',
     body: '',
-    createdAt: '2026-01-02T03:04:05Z'
+    createdAt: '2026-01-02T03:04:05Z',
+    tagIds: [] as number[]
 }
 
 describe('NoteDialog', () => {

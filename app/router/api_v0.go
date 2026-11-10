@@ -48,7 +48,9 @@ func newProblems(production bool) (*problemjson.Writer, error) {
 // a PathPrefix subrouter: subroutes inherit the prefix matcher, and when a later
 // subroute's prefix matches, gorilla/mux drops the "method mismatch" of an
 // earlier one, so a wrong method ends up as 404 instead of 405.
-func attachApiV0(r *mux.Router, notes handlers.NotesService, guard *authGuard, problems *problemjson.Writer, logger *slog.Logger) {
+func attachApiV0(r *mux.Router, notes handlers.NotesService, tags handlers.TagsService, guard *authGuard,
+	problems *problemjson.Writer, logger *slog.Logger,
+) {
 	api := func(path string) *mux.Route { return r.Path(apiV0MountPrefix + path) }
 
 	api("/info").Methods(http.MethodGet).Handler(handlers.InfoHandler())
@@ -60,6 +62,14 @@ func attachApiV0(r *mux.Router, notes handlers.NotesService, guard *authGuard, p
 	api("/notes/{noteId}").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(nh.Get)))
 	api("/notes/{noteId}").Methods(http.MethodPut).Handler(guard.protect(http.HandlerFunc(nh.Update)))
 	api("/notes/{noteId}").Methods(http.MethodDelete).Handler(guard.protect(http.HandlerFunc(nh.Delete)))
+	api("/notes/{noteId}/tags/{tagId}").Methods(http.MethodPut).Handler(guard.protect(http.HandlerFunc(nh.AddTag)))
+	api("/notes/{noteId}/tags/{tagId}").Methods(http.MethodDelete).Handler(guard.protect(http.HandlerFunc(nh.RemoveTag)))
+
+	th := &handlers.TagsHandler{Tags: tags, Problems: problems, Logger: logger}
+	api("/tags").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(th.List)))
+	api("/tags").Methods(http.MethodPost).Handler(guard.protect(http.HandlerFunc(th.Create)))
+	api("/tags/{tagId}").Methods(http.MethodPatch).Handler(guard.protect(http.HandlerFunc(th.Update)))
+	api("/tags/{tagId}").Methods(http.MethodDelete).Handler(guard.protect(http.HandlerFunc(th.Delete)))
 }
 
 // isAPIPath reports whether the request targets the API.

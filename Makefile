@@ -70,7 +70,15 @@ cover-report: ## generate a coverage report
 #==========================================================================================
 ##@ Running
 #==========================================================================================
-run: ## start the GO service
+# Local data of `make run`: the SQLite dir of zarf/config.yaml (db, -wal, -shm) and
+# the marker telling the demo data was added to it. `make clean` deletes it all.
+RUN_DATA_DIR := zarf/appData/sqlite
+DEMO_DATA_MARKER := $(RUN_DATA_DIR)/.demo-data
+
+run: ## start the GO service, adding demo data on the first run
+	@if [ ! -f $(DEMO_DATA_MARKER) ]; then \
+		go run main.go seed -c zarf/config.yaml && touch $(DEMO_DATA_MARKER); \
+	fi
 	@REFAPP_ENV_LOGLEVEL="debug" go run main.go start -c zarf/config.yaml
 
 run-ui: package-ui run ## build the web UI, then start the GO service with it embedded
@@ -125,8 +133,8 @@ tag: check-git-clean check-branch ## create a git tag to publish a new release
 	@git push --delete origin $(version) || true
 	@git push origin $(version) || true
 
-clean: ## clean build env
-	@rm -rf dist
+clean: ## remove build output and the local database of `make run` (demo data included)
+	@rm -rf dist $(RUN_DATA_DIR)
 
 
 #==========================================================================================
