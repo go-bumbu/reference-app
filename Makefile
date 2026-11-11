@@ -133,8 +133,8 @@ tag: check-git-clean check-branch ## create a git tag to publish a new release
 	@git push --delete origin $(version) || true
 	@git push origin $(version) || true
 
-clean: ## remove build output and the local database of `make run` (demo data included)
-	@rm -rf dist $(RUN_DATA_DIR)
+clean: ## remove build output and the local database and job logs of `make run` (demo data included)
+	@rm -rf dist $(RUN_DATA_DIR) zarf/appData/job-logs
 
 
 #==========================================================================================

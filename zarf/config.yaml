@@ -51,6 +51,16 @@ Auth:
       - "127.0.0.1"
       - "::1"
 
+# Background jobs (internal/jobs). The limits are shared by every tenant; a
+# tenant has at most one waiting or running run per job.
+Jobs:
+  Parallelism: 2   # runs executing at once
+  QueueSize: 100   # runs waiting at once
+  HistorySize: 100 # finished runs kept, with their logs
+  # one log file per run; relative to the working directory. One directory per
+  # server process: at startup it deletes the logs of runs it does not know.
+  LogDir: "zarf/appData/job-logs"
+
 Env:
   LogLevel: "info"
   # true masks API error bodies (no internal detail reaches the client)

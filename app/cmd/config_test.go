@@ -115,6 +115,30 @@ func TestGetAppCfgFileAndEnv(t *testing.T) {
 	}
 }
 
+// TestGetAppCfgJobs covers the Jobs section: defaults with an absolute log
+// directory, and limits below 1 failing the load.
+func TestGetAppCfgJobs(t *testing.T) {
+	cfg, err := getAppCfg("", false)
+	if err != nil {
+		t.Fatalf("getAppCfg: %v", err)
+	}
+	if !filepath.IsAbs(cfg.Jobs.LogDir) || cfg.Jobs.Parallelism < 1 || cfg.Jobs.QueueSize < 1 || cfg.Jobs.HistorySize < 1 {
+		t.Errorf("defaults: got %+v; want an absolute LogDir and limits of at least 1", cfg.Jobs)
+	}
+
+	for name, env := range map[string][2]string{
+		"zero parallelism": {"_JOBS_PARALLELISM", "0"},
+		"empty log dir":    {"_JOBS_LOGDIR", " "},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(EnvVarPrefix+env[0], env[1])
+			if _, err := getAppCfg("", false); err == nil {
+				t.Error("want an error")
+			}
+		})
+	}
+}
+
 // TestGetAppCfgDB covers the DB section: SQLite by default with an absolute
 // path, Postgres selected via the file with the password from an env var, and
 // a broken DB config failing the load instead of the startup.
@@ -238,7 +262,8 @@ func TestGetAppCfgAuth(t *testing.T) {
 // getting ErrOIDCNotImplemented proves runServer passed all of them in.
 func TestRunServerWiresTheRouter(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "config.yaml")
-	content := "Auth:\n  Method: oidc\nDB:\n  Sqlite:\n    Path: " + filepath.Join(t.TempDir(), "app.db") + "\n"
+	content := "Auth:\n  Method: oidc\nDB:\n  Sqlite:\n    Path: " + filepath.Join(t.TempDir(), "app.db") + "\n" +
+		"Jobs:\n  LogDir: " + filepath.Join(t.TempDir(), "job-logs") + "\n"
 	if err := os.WriteFile(file, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

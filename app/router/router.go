@@ -28,6 +28,8 @@ type Cfg struct {
 	// Tags is the notes module's tag tree (internal/notes, the same Service as
 	// Notes); required.
 	Tags handlers.TagsService
+	// Jobs is the jobs module (internal/jobs); required.
+	Jobs handlers.JobsService
 	// Tenants resolves the authenticated identity into tenant and user IDs
 	// (internal/tenants); required.
 	Tenants TenantProvisioner
@@ -55,6 +57,9 @@ func New(cfg Cfg) (http.Handler, error) {
 	if cfg.Tags == nil {
 		return nil, errors.New("router: Tags is required")
 	}
+	if cfg.Jobs == nil {
+		return nil, errors.New("router: Jobs is required")
+	}
 	if cfg.Tenants == nil {
 		return nil, errors.New("router: Tenants is required")
 	}
@@ -78,7 +83,7 @@ func New(cfg Cfg) (http.Handler, error) {
 		return prometheus.PromMiddleware(handler)
 	})
 
-	attachApiV0(r, cfg.Notes, cfg.Tags, guard, problems, logger)
+	attachApiV0(r, cfg.Notes, cfg.Tags, cfg.Jobs, guard, problems, logger)
 	if cfg.UI != nil {
 		attachUI(r, cfg.UI)
 	}

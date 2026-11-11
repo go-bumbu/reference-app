@@ -14,10 +14,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/go-bumbu/db/gormdb/gormdbtest"
 	"github.com/go-bumbu/db/gormdb/sqlite"
+	"github.com/go-bumbu/reference-app/internal/jobs"
 	"github.com/go-bumbu/reference-app/internal/notes"
 	"github.com/go-bumbu/reference-app/internal/tenants"
 	"github.com/gorilla/mux"
@@ -61,6 +63,15 @@ func loadSpec(t *testing.T) *openapi3.T {
 type testDeps struct {
 	notes   *notes.Service
 	tenants *tenants.Service
+	jobs    *jobs.Service
+}
+
+// holdUntilStopped is the jobs' per-note work in router tests: a run with
+// notes stays running until it is canceled or the jobs shut down, so the
+// tests see the same state every time.
+func holdUntilStopped(ctx context.Context, _, _ string) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func newDeps(t *testing.T) testDeps {
@@ -76,7 +87,21 @@ func newDeps(t *testing.T) testDeps {
 	if err != nil {
 		t.Fatalf("tenants.New: %v", err)
 	}
-	return testDeps{notes: notesSvc, tenants: tenantsSvc}
+	jobsSvc, err := jobs.New(db, jobs.Cfg{Notes: notesSvc, LogDir: t.TempDir(), ScanNote: holdUntilStopped})
+	if err != nil {
+		t.Fatalf("jobs.New: %v", err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := jobsSvc.ShutDown(ctx); err != nil {
+			t.Errorf("jobs.ShutDown: %v", err)
+		}
+	})
+	if err := jobsSvc.Start(context.Background()); err != nil {
+		t.Fatalf("jobs.Start: %v", err)
+	}
+	return testDeps{notes: notesSvc, tenants: tenantsSvc, jobs: jobsSvc}
 }
 
 // actorFor provisions the identity and returns it as a notes actor, to seed
@@ -92,7 +117,7 @@ func (d testDeps) actorFor(t *testing.T, tenant, subject string) notes.Actor {
 
 func newTestRouter(t *testing.T, d testDeps, production bool, auth AuthCfg) *mux.Router {
 	t.Helper()
-	h, err := New(Cfg{Notes: d.notes, Tags: d.notes, Tenants: d.tenants, Production: production, Auth: auth})
+	h, err := New(Cfg{Notes: d.notes, Tags: d.notes, Jobs: d.jobs, Tenants: d.tenants, Production: production, Auth: auth})
 	if err != nil {
 		t.Fatalf("router.New: %v", err)
 	}
@@ -201,6 +226,25 @@ func TestOpenAPIResponseContract(t *testing.T) {
 			if _, err := deps.notes.AddNoteTag(ctx, admin, existing.ID, reports.ID); err != nil {
 				t.Fatal(err)
 			}
+			// a run of each tenant, held running (holdUntilStopped), and a schedule of each
+			adminJobs, otherJobs := jobs.Actor{TenantID: admin.TenantID}, jobs.Actor{TenantID: other.TenantID}
+			run, _, err := deps.jobs.Trigger(ctx, adminJobs, jobs.ScanNotes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignRun, _, err := deps.jobs.Trigger(ctx, otherJobs, jobs.ScanNotes)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sched, err := deps.jobs.CreateSchedule(ctx, adminJobs, jobs.ScanNotes, jobs.ScheduleInput{Cron: "0 3 * * *", Enabled: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			foreignSched, err := deps.jobs.CreateSchedule(ctx, otherJobs, jobs.ScanNotes, jobs.ScheduleInput{Cron: "0 3 * * *"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			const scheds = "/jobs/scan-notes/schedules/"
 			r := newTestRouter(t, deps, production, AuthCfg{Method: AuthNone})
 			const tooBig = "9223372036854775808" // 1<<63: past every database's integer
 			tagPath := func(id uint) string { return "/tags/" + strconv.FormatUint(uint64(id), 10) }
@@ -332,6 +376,78 @@ func TestOpenAPIResponseContract(t *testing.T) {
 					wantStatus: http.StatusNotFound},
 				{name: "delete malformed tag id", method: http.MethodDelete, path: "/tags/abc", specPath: "/tags/{tagId}",
 					wantStatus: http.StatusNotFound},
+
+				// jobs and their schedules
+				{name: "list jobs", method: http.MethodGet, path: "/jobs", specPath: "/jobs", wantStatus: http.StatusOK},
+				{name: "create schedule", method: http.MethodPost, path: "/jobs/scan-notes/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":"0 4 * * *"}`, wantStatus: http.StatusCreated},
+				{name: "create disabled schedule", method: http.MethodPost, path: "/jobs/scan-notes/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":"0 0 5 * * *","enabled":false}`,
+					wantStatus: http.StatusCreated},
+				{name: "create schedule malformed json", method: http.MethodPost, path: "/jobs/scan-notes/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":`, wantStatus: http.StatusBadRequest},
+				{name: "create schedule unknown field", method: http.MethodPost, path: "/jobs/scan-notes/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":"0 4 * * *","tenant":"x"}`,
+					wantStatus: http.StatusBadRequest},
+				{name: "create schedule invalid cron", method: http.MethodPost, path: "/jobs/scan-notes/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":"every day"}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "create schedule every second", method: http.MethodPost, path: "/jobs/scan-notes/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":"* * * * * *"}`, wantStatus: http.StatusUnprocessableEntity},
+				{name: "create schedule of a missing job", method: http.MethodPost, path: "/jobs/nope/schedules",
+					specPath: "/jobs/{jobName}/schedules", body: `{"cron":"0 4 * * *"}`, wantStatus: http.StatusNotFound},
+				{name: "pause schedule", method: http.MethodPatch, path: scheds + sched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", body: `{"enabled":false}`, wantStatus: http.StatusOK},
+				{name: "change schedule cron", method: http.MethodPatch, path: scheds + sched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", body: `{"cron":"30 3 * * *","enabled":null}`,
+					wantStatus: http.StatusOK},
+				{name: "update schedule invalid cron", method: http.MethodPatch, path: scheds + sched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", body: `{"cron":"*/5 * * * * *"}`,
+					wantStatus: http.StatusUnprocessableEntity},
+				{name: "update schedule malformed json", method: http.MethodPatch, path: scheds + sched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", body: `{"cron":`, wantStatus: http.StatusBadRequest},
+				{name: "update schedule of another tenant", method: http.MethodPatch, path: scheds + foreignSched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", body: `{"enabled":true}`, wantStatus: http.StatusNotFound},
+				{name: "update missing schedule", method: http.MethodPatch, path: scheds + "missing",
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", body: `{"enabled":true}`, wantStatus: http.StatusNotFound},
+				{name: "delete schedule of another tenant", method: http.MethodDelete, path: scheds + foreignSched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", wantStatus: http.StatusNotFound},
+				{name: "delete schedule", method: http.MethodDelete, path: scheds + sched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", wantStatus: http.StatusNoContent},
+				{name: "delete missing schedule", method: http.MethodDelete, path: scheds + sched.ID,
+					specPath: "/jobs/{jobName}/schedules/{scheduleId}", wantStatus: http.StatusNotFound},
+
+				// runs: the tenant's run is held running until it is canceled
+				{name: "run job while it runs", method: http.MethodPost, path: "/jobs/scan-notes/runs",
+					specPath: "/jobs/{jobName}/runs", wantStatus: http.StatusOK},
+				{name: "run missing job", method: http.MethodPost, path: "/jobs/nope/runs",
+					specPath: "/jobs/{jobName}/runs", wantStatus: http.StatusNotFound},
+				{name: "list runs", method: http.MethodGet, path: "/job-runs", specPath: "/job-runs", wantStatus: http.StatusOK},
+				{name: "get run", method: http.MethodGet, path: "/job-runs/" + run.ID, specPath: "/job-runs/{runId}",
+					wantStatus: http.StatusOK},
+				{name: "get run of another tenant", method: http.MethodGet, path: "/job-runs/" + foreignRun.ID,
+					specPath: "/job-runs/{runId}", wantStatus: http.StatusNotFound},
+				{name: "get missing run", method: http.MethodGet, path: "/job-runs/missing", specPath: "/job-runs/{runId}",
+					wantStatus: http.StatusNotFound},
+				{name: "get run log", method: http.MethodGet, path: "/job-runs/" + run.ID + "/log",
+					specPath: "/job-runs/{runId}/log", wantStatus: http.StatusOK},
+				{name: "get run log tail", method: http.MethodGet, path: "/job-runs/" + run.ID + "/log?tail=1",
+					specPath: "/job-runs/{runId}/log", wantStatus: http.StatusOK},
+				{name: "get run log tail 0", method: http.MethodGet, path: "/job-runs/" + run.ID + "/log?tail=0",
+					specPath: "/job-runs/{runId}/log", wantStatus: http.StatusBadRequest},
+				{name: "get run log malformed tail", method: http.MethodGet, path: "/job-runs/" + run.ID + "/log?tail=x",
+					specPath: "/job-runs/{runId}/log", wantStatus: http.StatusBadRequest},
+				{name: "get run log of another tenant", method: http.MethodGet, path: "/job-runs/" + foreignRun.ID + "/log",
+					specPath: "/job-runs/{runId}/log", wantStatus: http.StatusNotFound},
+				{name: "cancel run of another tenant", method: http.MethodPost, path: "/job-runs/" + foreignRun.ID + "/cancel",
+					specPath: "/job-runs/{runId}/cancel", wantStatus: http.StatusNotFound},
+				{name: "cancel run", method: http.MethodPost, path: "/job-runs/" + run.ID + "/cancel",
+					specPath: "/job-runs/{runId}/cancel", wantStatus: http.StatusNoContent},
+				{name: "cancel ended run", method: http.MethodPost, path: "/job-runs/" + run.ID + "/cancel",
+					specPath: "/job-runs/{runId}/cancel", wantStatus: http.StatusNoContent},
+				{name: "get ended run", method: http.MethodGet, path: "/job-runs/" + run.ID, specPath: "/job-runs/{runId}",
+					wantStatus: http.StatusOK},
+				{name: "run job", method: http.MethodPost, path: "/jobs/scan-notes/runs",
+					specPath: "/jobs/{jobName}/runs", wantStatus: http.StatusAccepted},
 			}
 			for _, tc := range cases {
 				t.Run(tc.name, func(t *testing.T) {
@@ -376,15 +492,68 @@ func TestCreateTagLocation(t *testing.T) {
 	}
 }
 
+// TestRunJobLocation checks the Location the spec documents on 202 names the run.
+func TestRunJobLocation(t *testing.T) {
+	r := newTestRouter(t, newDeps(t), false, AuthCfg{Method: AuthNone})
+	rec := serve(r, http.MethodPost, "/jobs/scan-notes/runs", "")
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status: got %d, want 202; body: %s", rec.Code, rec.Body.String())
+	}
+	var run struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	loc := rec.Header().Get("Location")
+	if want := apiV0MountPrefix + "/job-runs/" + run.ID; loc != want {
+		t.Errorf("Location: got %q, want %q", loc, want)
+	}
+	if got := serve(r, http.MethodGet, strings.TrimPrefix(loc, apiV0MountPrefix), ""); got.Code != http.StatusOK {
+		t.Errorf("GET Location: got %d, want 200", got.Code)
+	}
+}
+
+// TestOpenAPIQueueFullContract covers the documented 429 with a fake whose
+// queue is always full.
+func TestOpenAPIQueueFullContract(t *testing.T) {
+	doc := loadSpec(t)
+	h, err := New(Cfg{Notes: failingNotes{}, Tags: failingNotes{}, Jobs: failingJobs{err: jobs.ErrQueueFull},
+		Tenants: fixedTenants{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := serve(h, http.MethodPost, "/jobs/scan-notes/runs", "")
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status: got %d, want 429", rec.Code)
+	}
+	validateResponse(t, doc, http.MethodPost, "/jobs/{jobName}/runs", rec)
+}
+
+// jobsCases are one request to every jobs operation, for the 401 and 500 contracts.
+var jobsCases = []contractCase{
+	{method: http.MethodGet, path: "/jobs", specPath: "/jobs"},
+	{method: http.MethodPost, path: "/jobs/scan-notes/runs", specPath: "/jobs/{jobName}/runs"},
+	{method: http.MethodPost, path: "/jobs/scan-notes/schedules", specPath: "/jobs/{jobName}/schedules",
+		body: `{"cron":"0 3 * * *"}`},
+	{method: http.MethodPatch, path: "/jobs/scan-notes/schedules/x", specPath: "/jobs/{jobName}/schedules/{scheduleId}",
+		body: `{"enabled":true}`},
+	{method: http.MethodDelete, path: "/jobs/scan-notes/schedules/x", specPath: "/jobs/{jobName}/schedules/{scheduleId}"},
+	{method: http.MethodGet, path: "/job-runs", specPath: "/job-runs"},
+	{method: http.MethodGet, path: "/job-runs/x", specPath: "/job-runs/{runId}"},
+	{method: http.MethodPost, path: "/job-runs/x/cancel", specPath: "/job-runs/{runId}/cancel"},
+	{method: http.MethodGet, path: "/job-runs/x/log", specPath: "/job-runs/{runId}/log"},
+}
+
 // TestOpenAPIInternalErrorContract covers the documented 500, which a healthy
 // module never produces, with a failing fake.
 func TestOpenAPIInternalErrorContract(t *testing.T) {
 	doc := loadSpec(t)
-	h, err := New(Cfg{Notes: failingNotes{}, Tags: failingNotes{}, Tenants: fixedTenants{}})
+	h, err := New(Cfg{Notes: failingNotes{}, Tags: failingNotes{}, Jobs: failingJobs{}, Tenants: fixedTenants{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tc := range []contractCase{
+	for _, tc := range append([]contractCase{
 		{method: http.MethodGet, path: "/notes", specPath: "/notes"},
 		{method: http.MethodPut, path: "/notes/x/tags/1", specPath: "/notes/{noteId}/tags/{tagId}"},
 		{method: http.MethodDelete, path: "/notes/x/tags/1", specPath: "/notes/{noteId}/tags/{tagId}"},
@@ -392,7 +561,7 @@ func TestOpenAPIInternalErrorContract(t *testing.T) {
 		{method: http.MethodPost, path: "/tags", specPath: "/tags", body: `{"name":"x"}`},
 		{method: http.MethodPatch, path: "/tags/1", specPath: "/tags/{tagId}", body: `{"name":"x"}`},
 		{method: http.MethodDelete, path: "/tags/1", specPath: "/tags/{tagId}"},
-	} {
+	}, jobsCases...) {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			rec := serve(h, tc.method, tc.path, tc.body)
 			if rec.Code != http.StatusInternalServerError {
@@ -464,6 +633,13 @@ func validateResponse(t *testing.T, doc *openapi3.T, method, specPath string, re
 		return
 	}
 	ct := rec.Header().Get("Content-Type")
+	// a text body (a run's log) has no JSON to validate: the documented media type is enough
+	if mediaType, _, _ := strings.Cut(ct, ";"); mediaType == "text/plain" {
+		if resp.Value.Content.Get("text/plain") == nil {
+			t.Fatalf("spec does not document text/plain for %d of %s %s", rec.Code, method, specPath)
+		}
+		return
+	}
 	media := resp.Value.Content.Get(ct)
 	if media == nil || media.Schema == nil {
 		t.Fatalf("spec does not document content type %q for %d of %s %s", ct, rec.Code, method, specPath)
@@ -498,7 +674,7 @@ func TestOpenAPIUnauthorizedContract(t *testing.T) {
 		{method: http.MethodPatch, path: "/tags/1", specPath: "/tags/{tagId}", body: `{"name":"x"}`},
 		{method: http.MethodDelete, path: "/tags/1", specPath: "/tags/{tagId}"},
 	}
-	for _, tc := range cases {
+	for _, tc := range append(cases, jobsCases...) {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			rec := serve(r, tc.method, tc.path, tc.body)
 			if rec.Code != http.StatusUnauthorized {
@@ -553,6 +729,46 @@ func (failingNotes) UpdateTag(context.Context, notes.Actor, uint, notes.TagPatch
 
 func (failingNotes) DeleteTag(context.Context, notes.Actor, uint) error {
 	return errors.New("db down")
+}
+
+// failingJobs answers every call with err, "db down" when it is nil.
+type failingJobs struct{ err error }
+
+func (f failingJobs) fail() error {
+	if f.err != nil {
+		return f.err
+	}
+	return errors.New("db down")
+}
+
+func (f failingJobs) Jobs(context.Context, jobs.Actor) ([]jobs.Job, error) { return nil, f.fail() }
+
+func (f failingJobs) Trigger(context.Context, jobs.Actor, string) (jobs.Run, bool, error) {
+	return jobs.Run{}, false, f.fail()
+}
+
+func (f failingJobs) Runs(context.Context, jobs.Actor) ([]jobs.Run, error) { return nil, f.fail() }
+
+func (f failingJobs) Run(context.Context, jobs.Actor, string) (jobs.Run, error) {
+	return jobs.Run{}, f.fail()
+}
+
+func (f failingJobs) Cancel(context.Context, jobs.Actor, string) error { return f.fail() }
+
+func (f failingJobs) Log(context.Context, jobs.Actor, string, int) ([]jobs.LogLine, error) {
+	return nil, f.fail()
+}
+
+func (f failingJobs) CreateSchedule(context.Context, jobs.Actor, string, jobs.ScheduleInput) (jobs.Schedule, error) {
+	return jobs.Schedule{}, f.fail()
+}
+
+func (f failingJobs) UpdateSchedule(context.Context, jobs.Actor, string, string, jobs.SchedulePatch) (jobs.Schedule, error) {
+	return jobs.Schedule{}, f.fail()
+}
+
+func (f failingJobs) DeleteSchedule(context.Context, jobs.Actor, string, string) error {
+	return f.fail()
 }
 
 // fixedTenants resolves every identity to the same principal, without a db.

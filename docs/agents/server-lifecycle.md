@@ -38,12 +38,18 @@ See [architecture.md](architecture.md) for the tiers, [database.md](database.md)
 ## Startup (`runServer`, `app/cmd/server.go`)
 
     resolve config file → getAppCfg → logger → startup + buffered config logs
-      → openDB (deferred Close) → newMainHandler (modules, auth, UI, router.New)
-      → servers: main (+ observability if enabled) → serveWithGracefulShutdown
+      → openDB (deferred Close) → newModules (tenants, notes, jobs) → newMainHandler (auth, UI, router.New)
+      → servers: main (+ observability if enabled) → jobs.Start → serveWithGracefulShutdown
 
 - Every step returns an error; nothing panics. Constructors validate required dependencies (`router.New` refuses a
   nil `Notes` or `Tenants`).
-- Modules are built here and migrate their own tables in `New`.
+- Modules are built here and migrate their own tables in `New`; `newModules` hands one module to another through
+  its interface (`notes.Service` is the jobs' `NoteSource`).
+- **Background workers start last** (`jobs.Start`: the runner's workers, then the scheduler), once nothing else can
+  fail before serving. A failing `Start` shuts the jobs down again and ends the command.
+- The `Jobs` section (`Parallelism` 2, `QueueSize` 100, `HistorySize` 100, `LogDir` `data/job-logs`, made absolute
+  by `normalizeJobsCfg`) configures `internal/jobs`. One log directory and one database per server process: tempo's
+  queue, schedules and log sweep are not shared between processes.
 - Servers set `ReadHeaderTimeout: 5s` (gosec G112, Slowloris).
 
 ## Servers and shutdown (`app/cmd/serve.go`)
@@ -54,8 +60,9 @@ See [architecture.md](architecture.md) for the tiers, [database.md](database.md)
 - Each server gets 10 s (`serverShutdownTimeout`). `http.Server.Shutdown` only *waits* for in-flight handlers, it
   never cancels them; when the grace period ends, `Close` drops the remaining connections, which is what cancels a
   stuck handler's context (`TestServeHTTPForceClosesStuckHandler`).
-- The shutdown hook then gets 30 s (`appShutdownTimeout`) to stop background workers. **It is an empty placeholder**:
-  start workers in `runServer` after the db and stop them in the hook.
+- The shutdown hook gets 30 s (`appShutdownTimeout`) to stop background workers: `jobs.ShutDown` stops the scheduler
+  (no new fires), then the runner, which cancels running runs and waits for them. The hook runs on every exit of
+  the servers, a failed bind included. A new worker stops in the same hook.
 - The db closes last, through the `defer`, after everything that uses it stopped, also after a failed startup step.
 - A second Ctrl-C during shutdown kills the process: the signal context is cancelled first, restoring default
   signal handling.

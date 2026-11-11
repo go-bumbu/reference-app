@@ -1,9 +1,19 @@
 # Background jobs — durable tasks and schedules with go-bumbu/tempo
 
 How a new app runs work outside a request: queued tasks, cron schedules, progress and logs that users can read.
-**reference-app has none of this yet.** Both aether and codex use [go-bumbu/tempo](https://github.com/go-bumbu/tempo)
-the same way, and this guide records their common shape. Read codex's `internal/tasks/` and its
-`docs/agents/tasks.md` before you build it. Lifecycle background: [server-lifecycle.md](server-lifecycle.md).
+aether and codex use [go-bumbu/tempo](https://github.com/go-bumbu/tempo) the same way, and this guide records their
+common shape. Lifecycle background: [server-lifecycle.md](server-lifecycle.md).
+
+**reference-app's own jobs are the tenant-facing variant** (`internal/jobs`, one job `scan-notes`, the web UI's
+Settings → Jobs after aether's Tasks page). Copy it when tenants run and watch their own jobs. It differs from the
+shape below in three deliberate ways, recorded in [../agents/architecture.md](../agents/architecture.md):
+
+- the module wraps tempo instead of exposing it, because the tenant filter must sit between tempo and every caller;
+- the API is the tenant API (`/api/v0/jobs`, `/api/v0/job-runs`), not the ops port, because the web UI drives it;
+- instead of `WithSingleton` (which would drop other tenants' runs), the module itself keeps one waiting or running
+  run per tenant and job, and the scheduler enqueues through that same check.
+
+For ops work across tenants (the shape below), read codex's `internal/tasks/` and its `docs/agents/tasks.md`.
 
 ## When to use a task runner
 

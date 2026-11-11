@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"github.com/go-bumbu/config"
 	"github.com/go-bumbu/db/gormdb"
 	"github.com/go-bumbu/reference-app/app/router"
+	"github.com/go-bumbu/reference-app/internal/jobs"
 )
 
 type AppCfg struct {
@@ -19,6 +21,7 @@ type AppCfg struct {
 	Obs    obsCfg `config:"Observability"`
 	DB     dbCfg
 	Auth   authCfg
+	Jobs   jobsCfg
 	Env    Env
 
 	// Msgs collects the config loader output; it is logged once the logger exists.
@@ -133,6 +136,20 @@ func (c dbCfg) gormCfg() gormdb.Cfg {
 	}
 }
 
+// jobsCfg configures the background jobs (internal/jobs).
+type jobsCfg struct {
+	// Parallelism is how many runs execute at once, every tenant together.
+	Parallelism int
+	// QueueSize is how many runs may wait at once.
+	QueueSize int
+	// HistorySize is how many finished runs are kept, every tenant together;
+	// older ones are removed with their logs.
+	HistorySize int
+	// LogDir holds one log file per run; relative paths are resolved against
+	// the working directory at startup. One directory per server process.
+	LogDir string
+}
+
 func listenAddr(bindIP string, port int) string {
 	if bindIP == "" {
 		return ":" + strconv.Itoa(port)
@@ -198,6 +215,12 @@ var defaultCfg = AppCfg{
 		Method:      router.AuthNone,
 		ProxyHeader: proxyHeaderCfg{UserHeader: "Remote-User"},
 	},
+	Jobs: jobsCfg{
+		Parallelism: jobs.DefaultParallelism,
+		QueueSize:   jobs.DefaultQueueSize,
+		HistorySize: jobs.DefaultHistorySize,
+		LogDir:      "data/job-logs",
+	},
 	Env: Env{
 		LogLevel: "info",
 	},
@@ -244,7 +267,26 @@ func getAppCfg(file string, mandatory bool) (AppCfg, error) {
 	if err := normalizeAuthCfg(&cfg.Auth); err != nil {
 		return cfg, fmt.Errorf("config Auth: %w", err)
 	}
+	if err := normalizeJobsCfg(&cfg.Jobs); err != nil {
+		return cfg, fmt.Errorf("config Jobs: %w", err)
+	}
 	return cfg, nil
+}
+
+// normalizeJobsCfg makes the log directory absolute and rejects limits below 1.
+func normalizeJobsCfg(c *jobsCfg) error {
+	if c.Parallelism < 1 || c.QueueSize < 1 || c.HistorySize < 1 {
+		return errors.New("limits must be at least 1: Parallelism, QueueSize, HistorySize")
+	}
+	if strings.TrimSpace(c.LogDir) == "" {
+		return errors.New("LogDir must not be empty")
+	}
+	abs, err := filepath.Abs(c.LogDir)
+	if err != nil {
+		return fmt.Errorf("resolve LogDir: %w", err)
+	}
+	c.LogDir = abs
+	return nil
 }
 
 // normalizeAuthCfg lower-cases the method, rejects an unknown one, and for

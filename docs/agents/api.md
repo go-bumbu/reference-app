@@ -20,6 +20,18 @@ See [architecture.md](architecture.md) for the tiers, [auth-and-tenancy.md](auth
 | `POST /api/v0/tags` | protected | create a tag (`parentId` 0 = root, `afterId` 0 = first); `201` + `Location`; `409` for a sibling's name |
 | `PATCH /api/v0/tags/{tagId}` | protected | rename / move (`parentId`) / reorder (`afterId`); absent fields untouched; applied whole or not at all |
 | `DELETE /api/v0/tags/{tagId}` | protected | delete the tag and its subtree, taking them off the notes; `204` |
+| `GET /api/v0/jobs` | protected | the jobs the app defines, each with the tenant's schedules of it |
+| `POST /api/v0/jobs/{jobName}/runs` | protected | queue a run for the tenant: `202` + `Location`, or `200` with the tenant's run already waiting or running; `429` when the queue is full |
+| `POST /api/v0/jobs/{jobName}/schedules` | protected | add a cron schedule; `201` + `Location`; `422` for a bad cron, one firing more than once a minute, or a 6th schedule |
+| `PATCH` / `DELETE /api/v0/jobs/{jobName}/schedules/{scheduleId}` | protected | change the cron or pause / resume (absent fields untouched); delete, `204` |
+| `GET /api/v0/job-runs` | protected | the tenant's runs, newest first, with progress while running |
+| `GET /api/v0/job-runs/{runId}` | protected | one run; another tenant's is `404` |
+| `POST /api/v0/job-runs/{runId}/cancel` | protected | cancel a waiting run or stop a running one; `204`, also for a run that already ended |
+| `GET /api/v0/job-runs/{runId}/log` | protected | `text/plain`, the last `?tail=` lines (1–1000, default 1000) |
+
+Jobs, their runs and their schedules are scoped to the caller's tenant like notes (`internal/jobs` filters tempo's
+data by the tenant in each run's params). Run and schedule ids are tempo's UUID strings, the one exception to the
+16-hex-char ids; a malformed one is a `404`, like an unknown one.
 
 `GET /notes?tagId={id}` narrows the list to the notes that carry the tag or any tag below it; an unknown tag is an
 empty list, a malformed one (not a positive int64, or given twice) `400`. Every `Note` carries `tagIds` (ascending).
@@ -65,6 +77,10 @@ not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsP
 | module `ErrNotFound`, `ErrTagNotFound`, a tag id that is not a positive integer | 404 | `not_found` |
 | module `ErrTagExists` (a sibling already has the name) | 409 | `conflict` |
 | module `ErrTooManyTags` (a create past `MaxTagsPerTenant`) | 422 | `validation_error`, no field |
+| `jobs.ErrJobNotFound`, `ErrRunNotFound`, `ErrScheduleNotFound` | 404 | `not_found` |
+| `jobs.ErrQueueFull` | 429 | `queue_full` |
+| `jobs.ErrTooManySchedules` (`MaxSchedulesPerJob` per tenant) | 422 | `validation_error`, no field |
+| a `tail` that is not one integer from 1 to 1000 | 400 | `bad_request` |
 | module `*ValidationError` (`WriteValidation`, pointer `/<field>`; the first failing field only, for now) | 422 | `validation_error` |
 | anything else, incl. a protected handler without identity | 500 | `internal` |
 
@@ -80,13 +96,16 @@ not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsP
 7. Update `webui/src/lib/api/types.ts` and `api.ts` if the UI uses it — [web-ui.md](web-ui.md).
 
 The mapping of every `internal/notes` error lives once, in `handlers/noteserrors.go` (`notesErrors`), for the notes
-and the tags handler alike.
+and the tags handler alike; the jobs handler maps `internal/jobs` errors in `JobsHandler.writeError`.
+
+The contract test validates a `text/plain` response (a run's log) by its documented media type only; every other
+body is validated against its schema.
 
 ## Go client (`libs/client`)
 
 Hand-written against the spec, stdlib only, shares no types with the server. API failures come back as
-`*client.Problem`, matching `client.ErrNotFound`, `ErrUnauthorized`, `ErrValidation` and `ErrConflict` with
-`errors.Is`.
+`*client.Problem`, matching `client.ErrNotFound`, `ErrUnauthorized`, `ErrValidation`, `ErrConflict` and
+`ErrQueueFull` with `errors.Is`. `RunJob` reports a `200` (a run already in flight) as `reused`.
 `WithHeader` lets development code play the trusted proxy.
 
 ## Versioning

@@ -406,5 +406,39 @@ func TestNoTenantFailsClosed(t *testing.T) {
 		if err := svc.Delete(ctx, none, "x"); !errors.Is(err, ErrNoTenant) {
 			t.Errorf("delete: got %v, want ErrNoTenant", err)
 		}
+		if _, err := svc.NoteIDs(ctx, ""); !errors.Is(err, ErrNoTenant) {
+			t.Errorf("note ids: got %v, want ErrNoTenant", err)
+		}
+	})
+}
+
+// TestNoteIDs checks the ids come newest first and only from the tenant asked for.
+func TestNoteIDs(t *testing.T) {
+	forEachDB(t, func(t *testing.T, db *gorm.DB) {
+		ctx := context.Background()
+		svc := newService(t, db, Cfg{Now: fixedClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))})
+		var want []string
+		for _, title := range []string{"first", "second"} {
+			n, err := svc.Create(ctx, acme, Input{Title: title})
+			if err != nil {
+				t.Fatal(err)
+			}
+			want = append([]string{n.ID}, want...)
+		}
+		if _, err := svc.Create(ctx, Actor{TenantID: "tenant-globex"}, Input{Title: "foreign"}); err != nil {
+			t.Fatal(err)
+		}
+
+		got, err := svc.NoteIDs(ctx, acme.TenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("got %v, want %v", got, want)
+		}
+		empty, err := svc.NoteIDs(ctx, "tenant-empty")
+		if err != nil || empty == nil || len(empty) != 0 {
+			t.Errorf("a tenant without notes: got %#v, %v; want an empty list", empty, err)
+		}
 	})
 }

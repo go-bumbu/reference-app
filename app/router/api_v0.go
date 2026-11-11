@@ -31,6 +31,7 @@ func newProblems(production bool) (*problemjson.Writer, error) {
 		BaseURI: problemBaseURI,
 		Titles: map[string]string{
 			handlers.SlugBadRequest: "Bad request",
+			handlers.SlugQueueFull:  "Job queue full",
 			slugMethodNotAllowed:    "Method not allowed",
 		},
 		Mode: mode,
@@ -48,8 +49,8 @@ func newProblems(production bool) (*problemjson.Writer, error) {
 // a PathPrefix subrouter: subroutes inherit the prefix matcher, and when a later
 // subroute's prefix matches, gorilla/mux drops the "method mismatch" of an
 // earlier one, so a wrong method ends up as 404 instead of 405.
-func attachApiV0(r *mux.Router, notes handlers.NotesService, tags handlers.TagsService, guard *authGuard,
-	problems *problemjson.Writer, logger *slog.Logger,
+func attachApiV0(r *mux.Router, notes handlers.NotesService, tags handlers.TagsService, jobs handlers.JobsService,
+	guard *authGuard, problems *problemjson.Writer, logger *slog.Logger,
 ) {
 	api := func(path string) *mux.Route { return r.Path(apiV0MountPrefix + path) }
 
@@ -70,6 +71,19 @@ func attachApiV0(r *mux.Router, notes handlers.NotesService, tags handlers.TagsS
 	api("/tags").Methods(http.MethodPost).Handler(guard.protect(http.HandlerFunc(th.Create)))
 	api("/tags/{tagId}").Methods(http.MethodPatch).Handler(guard.protect(http.HandlerFunc(th.Update)))
 	api("/tags/{tagId}").Methods(http.MethodDelete).Handler(guard.protect(http.HandlerFunc(th.Delete)))
+
+	jh := &handlers.JobsHandler{Jobs: jobs, Problems: problems, Logger: logger}
+	api("/jobs").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(jh.List)))
+	api("/jobs/{jobName}/runs").Methods(http.MethodPost).Handler(guard.protect(http.HandlerFunc(jh.RunJob)))
+	api("/jobs/{jobName}/schedules").Methods(http.MethodPost).Handler(guard.protect(http.HandlerFunc(jh.CreateSchedule)))
+	api("/jobs/{jobName}/schedules/{scheduleId}").Methods(http.MethodPatch).
+		Handler(guard.protect(http.HandlerFunc(jh.UpdateSchedule)))
+	api("/jobs/{jobName}/schedules/{scheduleId}").Methods(http.MethodDelete).
+		Handler(guard.protect(http.HandlerFunc(jh.DeleteSchedule)))
+	api("/job-runs").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(jh.ListRuns)))
+	api("/job-runs/{runId}").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(jh.GetRun)))
+	api("/job-runs/{runId}/cancel").Methods(http.MethodPost).Handler(guard.protect(http.HandlerFunc(jh.CancelRun)))
+	api("/job-runs/{runId}/log").Methods(http.MethodGet).Handler(guard.protect(http.HandlerFunc(jh.RunLog)))
 }
 
 // isAPIPath reports whether the request targets the API.

@@ -22,7 +22,8 @@ See [api.md](api.md) for the contract it consumes.
 | `src/components/NoteDialog.vue` | the note form, in a dialog: blank, it creates (the top bar's **Add note**, from any page); given a `note`, it edits that note (the note page's **Edit**). `NotesView` is a read-only card grid |
 | `src/components/SearchField.vue` | the top-bar search input; the shell binds it to the `?q=` query parameter |
 | `src/composables/useSidebar.ts`, `useTheme.ts` | module-level UI preferences kept in `localStorage`: sidebar collapsed; light / dark / auto mode and accent theme (`src/theme.ts` holds the palettes) |
-| `src/views/settings/`, `src/components/settings/` | the settings, after codex: `SettingsShell` (title + left nav) around Appearance (theme, mode), Jobs (**placeholder**: sample jobs, Run now only toasts) and About; the shell hides the tags rail there |
+| `src/views/settings/`, `src/components/settings/` | the settings, after codex: `SettingsShell` (title + left nav) around Appearance (theme, mode), Jobs and About; the shell hides the tags rail there |
+| `src/views/settings/JobsView.vue`, `src/components/jobs/`, `src/lib/jobs.ts` | the jobs page, after aether's Tasks page: a Jobs tab (each job's last run or live stage, schedule summary, **Run now** that turns into the run's progress; a `200` answer toasts "Already in progress") and a Runs tab (`JobRunsTable`: status counts, cancel a waiting or running run, a row opens `JobRunLogDialog`). `JobScheduleDialog` lists, adds, edits and removes the job's schedules, with 6-field presets and a `422` shown under the cron field. `lib/jobs.ts` holds the pure helpers (status labels, progress text, the latest run per job) |
 | `src/views/NoteView.vue` | one note, after codex's file and wiki pages: a read-only A4 sheet with a details card on its right, Edit / Delete at the card's foot, and a Tags card below it (each tag a link to its notes, Edit opens `TagsDialog` for the note). Edit opens `NoteDialog` (no in-place editing); delete asks through the shell's `ConfirmDialog` |
 | `src/views/NotesView.vue` | the card grid, narrowed by `?tag=` on the server and by `?q=` on the client; each card shows its tags and drags as a note |
 | `src/views/`, `src/router/` | screens and routes |
@@ -38,6 +39,9 @@ See [api.md](api.md) for the contract it consumes.
   `?tag=`, which the server applies; searching on a tag's list keeps it.
 - **Links to the notes list go through `RouterLink`'s `custom` slot** in the sidebar: RouterLink ignores the query,
   so it would mark every tag link active and `aria-current`. The sidebar is a nested list of links, not an ARIA tree.
+- **The job runs poll only while one is active**: `useJobRuns` refetches every second while a run is waiting or
+  running, and stops when none is; a run's log polls only while its dialog is open. Job keys start with `jobs`
+  (`['jobs']`, `['jobs','runs']`, `['jobs','runs',id,'log']`); a schedule change refetches `['jobs']` alone.
 - **A caller that needs every call's outcome uses `mutateAsync`** (a note drop's toast, a pick): `mutate`'s per-call
   callbacks fire for the latest call of the observer only.
 - **Query keys are a factory in `useApi.ts`**: every notes key starts with `notes` (`['notes','list',tag]`,

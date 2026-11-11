@@ -28,6 +28,10 @@ DB:
   Sqlite:
     Path: "/var/lib/refapp/sqlite/refapp.db"
 
+# Background jobs: one log file per run, next to the database.
+Jobs:
+  LogDir: "/var/lib/refapp/job-logs"
+
 # "none": every request is user "admin" of tenant "default" (demo only).
 # "proxy": the reverse proxy asserts the identity in headers; it must strip
 # those headers from client requests.

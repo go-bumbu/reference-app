@@ -55,6 +55,16 @@ Shown by `internal/notes/store.go` and `internal/tenants/store.go`:
 - IDs are 16 random hex chars (`crypto/rand`), generated in the module, not by the database.
 - Inject the clock through `Cfg.Now`; never call `time.Now` directly in module logic.
 
+## Library-owned tables: the jobs of `internal/jobs`
+
+`internal/jobs` owns two tables it never writes itself: tempo's `dbqueue` keeps the runs in `tempo_tasks` and
+`dbschedule` the schedules in `tempo_schedules`, each migrated by its own `New` (fixed names, no `tenant_id` column).
+The module reaches them only through tempo's runner and scheduler, and finds a run's or a schedule's tenant in its
+JSON params (`{"tenant_id": ...}`), so the tenant filter is applied in Go on every read. Runs are mirrored, not
+queried: the queue lives in memory and is recovered from `tempo_tasks` at startup, where a run that was running
+when the process died is marked `failed`. Run logs are not in the database but in `Jobs.LogDir`, one JSON Lines file
+per run, deleted with the run when the history is trimmed.
+
 ## Trees: the tags of `internal/notes`
 
 The tag tree is a closure table kept by [`github.com/go-bumbu/closure-tree`](https://github.com/go-bumbu/closure-tree)

@@ -55,6 +55,8 @@ github.com/go-bumbu/db v0.1.0 h1:cDreubgGZXpJMwzd2e/R4RyLM0u4+MAP9RwXO3NpNhU=
 github.com/go-bumbu/db v0.1.0/go.mod h1:xcK5GnGCwt5RDPi97JNGdTziT34VNUHIqDb6eZGt8J4=
 github.com/go-bumbu/http v0.6.0 h1:APxeM3T3GGfoYdjIwyUOdtqYU1XHodrMUJ6fI1dlfSg=
 github.com/go-bumbu/http v0.6.0/go.mod h1:/8vI7kGIgHhCt7CtkiyGnOgUx5HQdPN9OcOFG7ln3xQ=
+github.com/go-bumbu/tempo v0.4.3 h1:e1UQIIEzGQNXmE3m9xZtmZ1WsPBpqEz5CtrrYkLfqVA=
+github.com/go-bumbu/tempo v0.4.3/go.mod h1:QSOHvoaaybGMK5AnlT6D9EIRmeg5S3R0+TaxGUX171A=
 github.com/go-bumbu/testdbs v0.3.0 h1:oQUy5HbdMdcdAk9+EOLZHoWeHQeKFbhXh5c0h9PmQEI=
 github.com/go-bumbu/testdbs v0.3.0/go.mod h1:/IzC5oQ4G5HZV8urQOrTrknKhpOeSPWIAR7h5Vzohmg=
 github.com/go-bumbu/userauth v0.8.0 h1:Lydvf1xFzs+i3Acd2iPcpYRAB2+LRyuyZ07jzPNW4pE=
@@ -168,6 +170,8 @@ github.com/prometheus/procfs v0.22.0 h1:6q9+/JL9IKAPbCmBrv9n5O5Ty3NKnciV5X7YGw0o
 github.com/prometheus/procfs v0.22.0/go.mod h1:CvmFr/GVhIjIvWJZW3tgkODBQMRIf0EyWMQLHCHab58=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
+github.com/reugn/go-quartz v0.15.2 h1:IQUnwTtNURVtdcwH4CJhFH3dXAUwP2fXZaNjPp+sJAY=
+github.com/reugn/go-quartz v0.15.2/go.mod h1:00DVnBKq2Fxag/HlR9mGXjmHNlMFQ1n/LNM+Fn0jUaE=
 github.com/rogpeppe/go-internal v1.14.1 h1:UQB4HGPB6osV0SQTLymcB4TgvyWu6ZyliaW0tI/otEQ=
 github.com/rogpeppe/go-internal v1.14.1/go.mod h1:MaRKkUm5W0goXpeCfT7UZI6fk/L7L7so1lCWt35ZSgc=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=

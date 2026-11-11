@@ -15,6 +15,7 @@ import (
 	"github.com/go-bumbu/reference-app/app/metainfo"
 	"github.com/go-bumbu/reference-app/app/router"
 	"github.com/go-bumbu/reference-app/app/spa"
+	"github.com/go-bumbu/reference-app/internal/jobs"
 	"github.com/go-bumbu/reference-app/internal/notes"
 	"github.com/go-bumbu/reference-app/internal/tenants"
 	"github.com/spf13/cobra"
@@ -82,7 +83,11 @@ func runServer(configFile string) (err error) {
 		}
 	}()
 
-	mainHandler, err := newMainHandler(cfg, db, l)
+	mods, err := newModules(cfg, db, l)
+	if err != nil {
+		return err
+	}
+	mainHandler, err := newMainHandler(cfg, mods, l)
 	if err != nil {
 		return err
 	}
@@ -110,25 +115,58 @@ func runServer(configFile string) (err error) {
 		l.Info("observability server disabled", slog.String("component", "observability"))
 	}
 
-	// stop background workers (task runners, schedulers) in the shutdown hook;
-	// the db is closed by the deferred call above, after everything that uses it stopped.
-	shutdown := func(ctx context.Context) error { return nil }
+	// Background workers start last, once nothing else can fail before serving,
+	// and stop in the shutdown hook, which runs on every exit of the servers.
+	// The db is closed by the deferred call above, after everything that uses it stopped.
+	if err := mods.jobs.Start(context.Background()); err != nil {
+		stopCtx, cancel := context.WithTimeout(context.Background(), appShutdownTimeout)
+		defer cancel()
+		return errors.Join(fmt.Errorf("start jobs: %w", err), mods.jobs.ShutDown(stopCtx))
+	}
+	l.Info("jobs started", slog.String("component", "jobs"), slog.String("logDir", cfg.Jobs.LogDir))
+	shutdown := func(ctx context.Context) error {
+		// the scheduler stops first (no new fires), then the runner drains
+		return mods.jobs.ShutDown(ctx)
+	}
 
 	return serveWithGracefulShutdown(l, servers, shutdown)
 }
 
-// newMainHandler instantiates the business modules on db (each migrates its own
-// tables) and wires them, the auth method and the web UI into the main handler.
-func newMainHandler(cfg AppCfg, db *gorm.DB, l *slog.Logger) (http.Handler, error) {
+// modules are the business modules, built once on the shared db.
+type modules struct {
+	tenants *tenants.Service
+	notes   *notes.Service
+	jobs    *jobs.Service
+}
+
+// newModules instantiates the business modules on db; each migrates its own
+// tables. A module that needs another gets it here, through its interface.
+func newModules(cfg AppCfg, db *gorm.DB, l *slog.Logger) (modules, error) {
 	tenantsSvc, err := tenants.New(context.Background(), db, tenants.Cfg{})
 	if err != nil {
-		return nil, fmt.Errorf("init tenants: %w", err)
+		return modules{}, fmt.Errorf("init tenants: %w", err)
 	}
 	notesSvc, err := notes.New(context.Background(), db, notes.Cfg{})
 	if err != nil {
-		return nil, fmt.Errorf("init notes: %w", err)
+		return modules{}, fmt.Errorf("init notes: %w", err)
 	}
+	jobsSvc, err := jobs.New(db, jobs.Cfg{
+		Notes:       notesSvc,
+		LogDir:      cfg.Jobs.LogDir,
+		Parallelism: cfg.Jobs.Parallelism,
+		QueueSize:   cfg.Jobs.QueueSize,
+		HistorySize: cfg.Jobs.HistorySize,
+		Logger:      l,
+	})
+	if err != nil {
+		return modules{}, fmt.Errorf("init jobs: %w", err)
+	}
+	return modules{tenants: tenantsSvc, notes: notesSvc, jobs: jobsSvc}, nil
+}
 
+// newMainHandler wires the modules, the auth method and the web UI into the
+// main handler.
+func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, error) {
 	authCfg, err := cfg.Auth.routerCfg()
 	if err != nil {
 		return nil, fmt.Errorf("config Auth: %w", err)
@@ -140,9 +178,10 @@ func newMainHandler(cfg AppCfg, db *gorm.DB, l *slog.Logger) (http.Handler, erro
 	}
 	h, err := router.New(router.Cfg{
 		Logger:     l,
-		Notes:      notesSvc,
-		Tags:       notesSvc,
-		Tenants:    tenantsSvc,
+		Notes:      mods.notes,
+		Tags:       mods.notes,
+		Jobs:       mods.jobs,
+		Tenants:    mods.tenants,
 		Auth:       authCfg,
 		UI:         ui,
 		Production: cfg.Env.Production,
