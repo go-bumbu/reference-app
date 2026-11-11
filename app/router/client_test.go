@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-bumbu/reference-app/libs/client"
@@ -157,6 +158,71 @@ func TestClientAgainstRouter(t *testing.T) {
 	}
 	if err := alice.DeleteTag(ctx, work.ID); err != nil {
 		t.Errorf("delete tag: %v", err)
+	}
+
+	testJobsClient(ctx, t, alice, as("globex", "carol"))
+}
+
+// testJobsClient drives every jobs operation of the client; alice's tenant has
+// notes, so her run is held running (holdUntilStopped) until she cancels it.
+func testJobsClient(ctx context.Context, t *testing.T, alice, carol *client.Client) {
+	t.Helper()
+	list, err := alice.Jobs(ctx)
+	if err != nil || len(list) == 0 || list[0].Name != "scan-notes" || list[0].Schedules == nil {
+		t.Fatalf("jobs: got %+v, %v", list, err)
+	}
+	run, reused, err := alice.RunJob(ctx, "scan-notes")
+	if err != nil || reused || run.ID == "" {
+		t.Fatalf("run job: got %+v reused %v, %v", run, reused, err)
+	}
+	again, reused, err := alice.RunJob(ctx, "scan-notes")
+	if err != nil || !reused || again.ID != run.ID {
+		t.Errorf("run job again: got %+v reused %v, %v; want the first run", again, reused, err)
+	}
+	if _, _, err := alice.RunJob(ctx, "nope"); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("run a missing job: got %v, want ErrNotFound", err)
+	}
+	runs, err := alice.JobRuns(ctx)
+	if err != nil || len(runs) != 1 || runs[0].ID != run.ID {
+		t.Errorf("runs: got %+v, %v", runs, err)
+	}
+	if _, err := carol.JobRun(ctx, run.ID); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("another tenant's run: got %v, want ErrNotFound", err)
+	}
+	if err := alice.CancelJobRun(ctx, run.ID); err != nil {
+		t.Errorf("cancel: %v", err)
+	}
+	if ended, err := alice.JobRun(ctx, run.ID); err != nil || ended.Status != "canceled" || ended.EndedAt == nil {
+		t.Errorf("canceled run: got %+v, %v", ended, err)
+	}
+	if text, err := alice.JobRunLog(ctx, run.ID, 0); err != nil || text == "" {
+		t.Errorf("log: got %q, %v", text, err)
+	}
+	if text, err := alice.JobRunLog(ctx, run.ID, 1); err != nil || strings.Count(text, "\n") != 1 {
+		t.Errorf("log tail 1: got %q, %v", text, err)
+	}
+	if _, err := carol.JobRunLog(ctx, run.ID, 0); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("another tenant's log: got %v, want ErrNotFound", err)
+	}
+
+	off := false
+	sched, err := alice.CreateJobSchedule(ctx, "scan-notes", client.JobScheduleInput{Cron: "0 3 * * *", Enabled: &off})
+	if err != nil || sched.Cron != "0 0 3 * * *" || sched.Enabled || sched.NextRunAt != nil {
+		t.Fatalf("create schedule: got %+v, %v", sched, err)
+	}
+	if _, err := alice.CreateJobSchedule(ctx, "scan-notes", client.JobScheduleInput{Cron: "bad"}); !errors.Is(err, client.ErrValidation) {
+		t.Errorf("a bad cron: got %v, want ErrValidation", err)
+	}
+	on := true
+	resumed, err := alice.UpdateJobSchedule(ctx, "scan-notes", sched.ID, client.JobSchedulePatch{Enabled: &on})
+	if err != nil || !resumed.Enabled || resumed.NextRunAt == nil {
+		t.Errorf("resume schedule: got %+v, %v", resumed, err)
+	}
+	if err := carol.DeleteJobSchedule(ctx, "scan-notes", sched.ID); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("delete another tenant's schedule: got %v, want ErrNotFound", err)
+	}
+	if err := alice.DeleteJobSchedule(ctx, "scan-notes", sched.ID); err != nil {
+		t.Errorf("delete schedule: %v", err)
 	}
 }
 

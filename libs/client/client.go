@@ -7,9 +7,8 @@
 // router to keep both honest).
 //
 // Errors returned by the API are *Problem values (RFC 9457); compare them with
-// errors.Is against ErrNotFound, ErrUnauthorized, ErrValidation and
-// ErrConflict, or use
-// errors.As for the details.
+// errors.Is against ErrNotFound, ErrUnauthorized, ErrValidation, ErrConflict
+// and ErrQueueFull, or use errors.As for the details.
 package client
 
 import (
@@ -21,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -262,46 +262,61 @@ func tagPath(id uint) string {
 // do sends the request and decodes a wantStatus response into out; any other
 // status becomes a *Problem. path must already be escaped.
 func (c *Client) do(ctx context.Context, method, path string, body any, wantStatus int, out any) error {
+	_, err := c.call(ctx, method, path, body, out, wantStatus)
+	return err
+}
+
+// call is do for an operation with several success statuses: it decodes a
+// response of any of them into out and returns which one it was.
+func (c *Client) call(ctx context.Context, method, path string, body, out any, want ...int) (int, error) {
+	resp, data, err := c.send(ctx, method, path, body, "application/json, application/problem+json")
+	if err != nil {
+		return 0, err
+	}
+	if !slices.Contains(want, resp.StatusCode) {
+		return 0, newProblem(resp, data)
+	}
+	if out == nil { // a response without a body, e.g. 204
+		return resp.StatusCode, nil
+	}
+	if err := json.Unmarshal(data, out); err != nil {
+		return 0, fmt.Errorf("client: %s %s: decode response: %w", method, path, err)
+	}
+	return resp.StatusCode, nil
+}
+
+// send sends the request and reads the response body.
+func (c *Client) send(ctx context.Context, method, path string, body any, accept string) (*http.Response, []byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("client: encode request: %w", err)
+			return nil, nil, fmt.Errorf("client: encode request: %w", err)
 		}
 		reqBody = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, reqBody)
 	if err != nil {
-		return fmt.Errorf("client: build request: %w", err)
+		return nil, nil, fmt.Errorf("client: build request: %w", err)
 	}
 	for k, v := range c.headers {
 		req.Header[k] = v
 	}
-	req.Header.Set("Accept", "application/json, application/problem+json")
+	req.Header.Set("Accept", accept)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("client: %s %s: %w", method, path, err)
+		return nil, nil, fmt.Errorf("client: %s %s: %w", method, path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 	if err != nil {
-		return fmt.Errorf("client: %s %s: read response: %w", method, path, err)
+		return nil, nil, fmt.Errorf("client: %s %s: read response: %w", method, path, err)
 	}
-
-	if resp.StatusCode != wantStatus {
-		return newProblem(resp, data)
-	}
-	if out == nil { // a response without a body, e.g. 204
-		return nil
-	}
-	if err := json.Unmarshal(data, out); err != nil {
-		return fmt.Errorf("client: %s %s: decode response: %w", method, path, err)
-	}
-	return nil
+	return resp, data, nil
 }
 
 // Sentinel errors a *Problem matches with errors.Is, by status code.
@@ -310,6 +325,8 @@ var (
 	ErrNotFound     = errors.New("not found")
 	ErrValidation   = errors.New("validation failed")
 	ErrConflict     = errors.New("conflict")
+	// ErrQueueFull is a full job queue (429): try again later.
+	ErrQueueFull = errors.New("job queue full")
 )
 
 // Problem is an error response of the API: an RFC 9457 problem details body,
@@ -354,6 +371,8 @@ func (p *Problem) Is(target error) bool {
 		return p.Status == http.StatusUnprocessableEntity
 	case ErrConflict:
 		return p.Status == http.StatusConflict
+	case ErrQueueFull:
+		return p.Status == http.StatusTooManyRequests
 	}
 	return false
 }

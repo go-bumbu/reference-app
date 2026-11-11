@@ -8,8 +8,10 @@ require (
 	github.com/go-bumbu/config v0.5.0
 	github.com/go-bumbu/db v0.1.0
 	github.com/go-bumbu/http v0.6.0
+	github.com/go-bumbu/tempo v0.4.3
 	github.com/go-bumbu/testdbs v0.3.0
 	github.com/go-bumbu/userauth v0.8.0
+	github.com/google/uuid v1.6.0
 	github.com/gorilla/mux v1.8.1
 	github.com/mattn/go-isatty v0.0.24
 	github.com/phsym/console-slog v0.3.1
@@ -46,7 +48,6 @@ require (
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/go-sql-driver/mysql v1.9.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/google/uuid v1.6.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
@@ -79,6 +80,7 @@ require (
 	github.com/prometheus/common v0.72.0 // indirect
 	github.com/prometheus/procfs v0.22.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
+	github.com/reugn/go-quartz v0.15.2 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/samber/slog-common v0.21.0 // indirect
 	github.com/samber/slog-multi v1.8.0 // indirect

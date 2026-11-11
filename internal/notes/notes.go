@@ -190,6 +190,16 @@ func (s *Service) List(ctx context.Context, a Actor, opts ListOptions) ([]Note, 
 	return s.store.list(ctx, a.TenantID, opts)
 }
 
+// NoteIDs returns the ids of every note of the tenant, newest first. It is for
+// background work that acts for a tenant rather than for a user (a job), so it
+// takes the tenant id alone; still, without one it fails closed.
+func (s *Service) NoteIDs(ctx context.Context, tenantID string) ([]string, error) {
+	if tenantID == "" {
+		return nil, ErrNoTenant
+	}
+	return s.store.noteIDs(ctx, tenantID)
+}
+
 func validate(in Input) error {
 	switch {
 	case in.Title == "":

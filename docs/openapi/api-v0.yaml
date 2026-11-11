@@ -34,6 +34,12 @@ info:
     at the root or under another tag. A note carries any number of tags
     (`Note.tagIds`), and listing the notes of a tag (`GET /notes?tagId=`) lists
     the notes that carry it or any tag below it.
+
+
+    Jobs are background work the server defines (`GET /jobs`). A run of a job
+    works on the caller's tenant only, and its runs, logs and schedules belong
+    to that tenant: another tenant's do not exist for the caller (`404`). Run
+    and schedule ids are UUID strings, not the 16 hex chars of a note id.
 servers:
   - url: /api/v0
     description: >
@@ -51,6 +57,11 @@ tags:
     description: >
       The tree of tags that organises the notes of the caller's tenant, owned by
       the `internal/notes` module.
+  - name: jobs
+    description: >
+      Background jobs of the caller's tenant: start a run, follow its progress
+      and log, cancel it, and run a job on cron schedules. Backed by the
+      `internal/jobs` module.
 
 paths:
   /info:
@@ -383,6 +394,254 @@ paths:
         '500':
           $ref: '#/components/responses/Internal'
 
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: List jobs
+      description: >
+        Returns every job the server defines, each with the caller's tenant's
+        schedules of it.
+      responses:
+        '200':
+          description: The jobs.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /jobs/{jobName}/runs:
+    parameters:
+      - $ref: '#/components/parameters/JobName'
+    post:
+      operationId: runJob
+      tags: [jobs]
+      summary: Run a job
+      description: >
+        Queues a run of the job for the caller's tenant. While the tenant has a
+        run of the job waiting or running, no second one is queued: the answer
+        is `200` with that run instead of `202` with a new one.
+      responses:
+        '202':
+          description: The queued run.
+          headers:
+            Location:
+              description: URL of the run.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRun'
+        '200':
+          description: The run of the job the tenant already has waiting or running.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRun'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/QueueFull'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /jobs/{jobName}/schedules:
+    parameters:
+      - $ref: '#/components/parameters/JobName'
+    post:
+      operationId: createJobSchedule
+      tags: [jobs]
+      summary: Schedule a job
+      description: >
+        Adds a cron schedule that runs the job for the caller's tenant. A
+        tenant has at most 5 schedules per job. A fire while the tenant's run
+        of the job is still waiting or running is skipped.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobScheduleInput'
+      responses:
+        '201':
+          description: The created schedule.
+          headers:
+            Location:
+              description: URL of the created schedule.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSchedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /jobs/{jobName}/schedules/{scheduleId}:
+    parameters:
+      - $ref: '#/components/parameters/JobName'
+      - $ref: '#/components/parameters/ScheduleId'
+    patch:
+      operationId: updateJobSchedule
+      tags: [jobs]
+      summary: Change a job schedule
+      description: >
+        Changes the cron expression or pauses and resumes a schedule; absent
+        fields are left as they are.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JobSchedulePatch'
+      responses:
+        '200':
+          description: The changed schedule.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobSchedule'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/Internal'
+    delete:
+      operationId: deleteJobSchedule
+      tags: [jobs]
+      summary: Delete a job schedule
+      description: Deletes the schedule; runs it already queued are not affected.
+      responses:
+        '204':
+          description: The schedule was deleted.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /job-runs:
+    get:
+      operationId: listJobRuns
+      tags: [jobs]
+      summary: List job runs
+      description: >
+        Returns the runs of the caller's tenant, newest first: the waiting and
+        running ones and the recent history. The server keeps a bounded history
+        of finished runs shared by every tenant, so old runs and their logs
+        disappear.
+      responses:
+        '200':
+          description: The runs of the caller's tenant.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRunList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /job-runs/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      operationId: getJobRun
+      tags: [jobs]
+      summary: Get a job run
+      description: Returns one run of the caller's tenant, with its progress while it runs.
+      responses:
+        '200':
+          description: The run.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobRun'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /job-runs/{runId}/cancel:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    post:
+      operationId: cancelJobRun
+      tags: [jobs]
+      summary: Cancel a job run
+      description: >
+        Cancels a waiting run, or stops a running one and waits for it to end.
+        A run that already ended is left as it is: the answer is `204` too.
+      responses:
+        '204':
+          description: The run is not waiting or running any more.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /job-runs/{runId}/log:
+    parameters:
+      - $ref: '#/components/parameters/RunId'
+    get:
+      operationId: getJobRunLog
+      tags: [jobs]
+      summary: Get a job run's log
+      description: >
+        Returns the last lines of the run's log as plain text, one
+        `<RFC 3339 time> <LEVEL> <message>` line each, empty before the run
+        starts.
+      parameters:
+        - name: tail
+          in: query
+          required: false
+          description: How many of the last lines to return.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 1000
+      responses:
+        '200':
+          description: The log.
+          content:
+            text/plain:
+              schema:
+                type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
 components:
   parameters:
     NoteId:
@@ -404,6 +663,31 @@ components:
         type: integer
         minimum: 1
         maximum: 9223372036854775807
+    JobName:
+      name: jobName
+      in: path
+      required: true
+      description: Name of the job (`Job.name`).
+      schema:
+        type: string
+        maxLength: 64
+        examples: [scan-notes]
+    ScheduleId:
+      name: scheduleId
+      in: path
+      required: true
+      description: Id of the schedule.
+      schema:
+        type: string
+        maxLength: 64
+    RunId:
+      name: runId
+      in: path
+      required: true
+      description: Id of the run.
+      schema:
+        type: string
+        maxLength: 64
 
   schemas:
     Info:
@@ -584,6 +868,154 @@ components:
             Id of the sibling, under the parent the tag ends up in, to place it
             after; `0` places it first.
 
+    Job:
+      type: object
+      additionalProperties: false
+      required: [name, title, description, schedules]
+      properties:
+        name:
+          type: string
+          description: Stable id of the job, used in its paths.
+          examples: [scan-notes]
+        title:
+          type: string
+          examples: [Scan notes]
+        description:
+          type: string
+        schedules:
+          type: array
+          description: The caller's tenant's schedules of the job, oldest first.
+          items:
+            $ref: '#/components/schemas/JobSchedule'
+
+    JobList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Job'
+
+    JobSchedule:
+      type: object
+      additionalProperties: false
+      required: [id, cron, enabled, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        cron:
+          type: string
+          description: >
+            The cron expression in its stored 6-field form (seconds first): a
+            5-field `0 3 * * *` is stored as `0 0 3 * * *`.
+          examples: ['0 0 3 * * *']
+        enabled:
+          type: boolean
+          description: A disabled schedule is kept but does not fire.
+        nextRunAt:
+          type: string
+          format: date-time
+          description: When it fires next; absent while it is disabled.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    JobScheduleInput:
+      type: object
+      additionalProperties: false
+      required: [cron]
+      properties:
+        cron:
+          type: string
+          description: >
+            A 5-field Unix (`min hour dom month dow`) or 6-field Quartz (seconds
+            first) cron expression, in the server's time zone. It may fire at
+            most once a minute: the seconds field of a 6-field expression must be
+            one number.
+          minLength: 1
+          maxLength: 100
+          examples: ['0 3 * * *']
+        enabled:
+          type: boolean
+          default: true
+
+    JobSchedulePatch:
+      type: object
+      additionalProperties: false
+      description: >
+        Every field is optional; an absent one is left as it is. A `null` field
+        counts as absent.
+      properties:
+        cron:
+          type: string
+          description: As in `JobScheduleInput.cron`.
+          minLength: 1
+          maxLength: 100
+        enabled:
+          type: boolean
+
+    JobRun:
+      type: object
+      additionalProperties: false
+      required: [id, job, status, queuedAt]
+      properties:
+        id:
+          type: string
+        job:
+          type: string
+          description: Name of the job (`Job.name`).
+        status:
+          type: string
+          description: >
+            `cancel_error` is a run that did not stop in time after a cancel; it
+            ends with the status its own return gives.
+          enum: [waiting, running, complete, failed, panicked, canceled, cancel_error]
+        queuedAt:
+          type: string
+          format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          description: Absent until the run starts.
+        endedAt:
+          type: string
+          format: date-time
+          description: Absent until the run ends.
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+
+    JobProgress:
+      type: object
+      additionalProperties: false
+      description: The latest progress of a running run; absent on the others.
+      required: [done, total]
+      properties:
+        done:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+          description: Units of work of the current step; `0` when it has no known size.
+        stage:
+          type: string
+          description: What the run is doing now.
+
+    JobRunList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/JobRun'
+
     Problem:
       type: object
       description: RFC 9457 problem details.
@@ -664,6 +1096,12 @@ components:
             $ref: '#/components/schemas/Problem'
     NotFound:
       description: The resource does not exist.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    QueueFull:
+      description: The server's job queue is full; try again later.
       content:
         application/problem+json:
           schema:

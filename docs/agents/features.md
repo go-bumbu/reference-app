@@ -13,7 +13,13 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 | Main HTTP server + graceful shutdown | Implemented | `app/cmd/serve.go` |
 | Observability server (`/metrics`, `/health`, `/ready`) | Implemented, opt-in | `app/router/observability.go`; `Observability.Enabled` |
 | Real health / readiness checks | Partial | both probes answer a static `OK`; wire real state when startup work appears |
-| Background workers (schedulers, task runners) | Not implemented | the shutdown hook in `runServer` is the place to stop them |
+| Background jobs: queue, workers, cron schedules, per-run logs and progress | Implemented | `internal/jobs` on `go-bumbu/tempo` (tables `tempo_tasks`, `tempo_schedules`; logs in `Jobs.LogDir`); started last in `runServer`, stopped in the shutdown hook |
+| Job `scan-notes`: walks every note of the tenant | Implemented, stub work | `internal/jobs/scannotes.go`; `scanNoteStub` waits 50 ms per note in place of real work; logs one line per scanned note, so the log endpoint (at most 1000 lines) shows only the last ones of a large tenant |
+| Jobs per tenant: runs, logs, schedules visible to their tenant only; one waiting or running run per tenant and job | Implemented | the tenant id rides in tempo's params; `/jobs`, `/job-runs` — [api.md](api.md) |
+| Jobs admin / ops view across tenants | Not implemented | no admin role; every job API is tenant-scoped |
+| Run history per tenant | Partial | `HistorySize` is shared by every tenant: a busy tenant pushes out the others' old runs and their logs |
+| Missed schedule fires replayed after a restart | Not implemented, by tempo's design | a fire due while the server was down is skipped |
+| Jobs across several server processes | Not implemented | one process per database and log directory: tempo's queue and scheduler hold within one process |
 | Request logging + Prometheus request metrics | Implemented | `libs/middleware/{log,prometheus}`, mounted in `router.New` |
 | REST API `/api/v0`: `info`, `me`, notes list / create / get / update / delete | Implemented | `app/router/api_v0.go` — [api.md](api.md) |
 | Tags: one tree per tenant, any number per note, notes listed by tag (subtree included) | Implemented | `internal/notes/tags.go`, `tagstore.go` (closure table via `go-bumbu/closure-tree`); `/tags`, `/notes/{id}/tags/{tagId}`, `GET /notes?tag=` |
@@ -34,7 +40,7 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 | Vue web UI, embedded in the binary | Implemented | `webui/`, `app/spa` — [web-ui.md](web-ui.md) |
 | Web UI search (notes, client-side `?q=` filter) | Implemented | `webui/src/App.vue`, `views/NotesView.vue` |
 | Web UI settings: theme, light / dark / auto mode | Implemented, per device | `webui/src/views/settings/`; kept in `localStorage`, no user settings API |
-| Web UI settings: Jobs | Placeholder | sample jobs whose Run now only toasts; needs the background workers below |
+| Web UI settings: Jobs | Implemented | `webui/src/views/settings/JobsView.vue`, `components/jobs/`, after aether's Tasks page: run now with progress, schedules, runs with cancel and log |
 | Web UI tags: sidebar tree, drag a note onto a tag, tag editor dialog | Implemented | `webui/src/components/AppNav.vue`, `components/tags/` — [web-ui.md](web-ui.md); nothing about tags lives in the settings |
 | Moving tags without a pointer drag | Partial | "Move to…" in the editor nests a tag anywhere (keyboard, touch); reordering among siblings is drag only |
 | More than 1000 tags per tenant | Not implemented, by design | `notes.MaxTagsPerTenant` keeps `GET /tags` one unpaginated response |

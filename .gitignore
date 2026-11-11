@@ -31,5 +31,6 @@ webui/dist/
 carbon.db
 zarf/appData/session
 zarf/appData/sqlite
+zarf/appData/job-logs
 data/
 !zarf/appData/session/.gitkeep

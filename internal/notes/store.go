@@ -162,6 +162,17 @@ func (s *store) delete(ctx context.Context, tenantID, id string) error {
 // list returns the tenant's notes with their tags, newest first, narrowed to
 // the notes under a tag when opts names one; the id breaks ties so the order is
 // stable. Like get, it reads without a transaction.
+// noteIDs returns the ids of the tenant's notes in the order of list.
+func (s *store) noteIDs(ctx context.Context, tenantID string) ([]string, error) {
+	ids := []string{}
+	err := s.db.WithContext(ctx).Model(&noteRow{}).Where("tenant_id = ?", tenantID).
+		Order("created_at DESC, id ASC").Pluck("id", &ids).Error
+	if err != nil {
+		return nil, fmt.Errorf("select note ids: %w", err)
+	}
+	return ids, nil
+}
+
 func (s *store) list(ctx context.Context, tenantID string, opts ListOptions) ([]Note, error) {
 	db := s.db.WithContext(ctx)
 	notesQuery := func() *gorm.DB {
