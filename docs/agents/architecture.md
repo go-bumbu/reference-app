@@ -29,8 +29,8 @@ Start here, then read the topic doc for the area you change:
                  │
                internal/notes   internal/tenants   internal/jobs   business modules
                  │
-               libs/middleware/{log,prometheus}  libs/client   foundation
-               (external: go-bumbu/db/gormdb, go-bumbu/http, go-bumbu/config, go-bumbu/tempo, ...)
+               libs/client                                     foundation
+               (external: go-bumbu/db/gormdb, go-bumbu/http (middleware, problemjson, spa), go-bumbu/config, go-bumbu/tempo, ...)
 
 Dependencies only point down: `app/` → `internal/` → `libs/`. `.go-deps-view.config` lays the graph out along these
 tiers for [go-deps-view](https://github.com/candy-tools/go-deps-view); nothing enforces them in lint yet (see debt).

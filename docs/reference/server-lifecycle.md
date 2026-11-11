@@ -77,8 +77,9 @@ uploads and is never cleared; `image-cache/` holds re-encoded copies and is safe
 
 - A second `http.Server` on its own port (default 9090), opt-in (`Observability.Enabled`). Keep it off the public
   interface. Bind it to localhost or a private network.
-- `/metrics` uses the Prometheus default registry. `libs/middleware/prometheus` records request durations, labelled
-  by **route template** (not the raw path), so label cardinality stays bounded.
+- `/metrics` uses the Prometheus default registry. The `go-bumbu/http/middleware` request middleware records request
+  durations through a `middleware/metrics` observer, labelled by **route pattern** (not the raw path), so label
+  cardinality stays bounded. Create the observer once per process: it registers in the registry.
 - `/ready` should reflect startup work: caches warmed, migrations done.
 - `/health` should reflect the process itself. **Do not tie it to the database**: one network blip would fail every
   replica's probe and restart all of them.

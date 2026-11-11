@@ -13,9 +13,8 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/go-bumbu/http/middleware"
 	"github.com/go-bumbu/reference-app/app/router/handlers"
-	"github.com/go-bumbu/reference-app/libs/middleware/log"
-	"github.com/go-bumbu/reference-app/libs/middleware/prometheus"
 	"github.com/gorilla/mux"
 )
 
@@ -41,16 +40,39 @@ type Cfg struct {
 	// Production masks the problem+json error bodies: status and instance only,
 	// no internal detail. Sourced from Env.Production.
 	Production bool
+	// Metrics records one observation per request (go-bumbu/http
+	// middleware/metrics); nil records no metrics. It registers in the
+	// Prometheus registry, so app/cmd creates it once per process.
+	Metrics middleware.Observer
 }
 
-// New builds the main application handler. It returns an error so that wiring
-// which can fail (e.g. a missing dependency) is reported at startup instead of
-// panicking on the first request.
+// New builds the main application handler: the routes, wrapped in the
+// go-bumbu/http request middleware (request log, metrics, panic recovery). It
+// returns an error so that wiring which can fail (e.g. a missing dependency) is
+// reported at startup instead of panicking on the first request.
 func New(cfg Cfg) (http.Handler, error) {
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	r, err := newRoutes(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// The middleware wraps the whole router rather than going through r.Use:
+	// gorilla/mux only runs r.Use middleware on a matched route, so 404 and 405
+	// would go unlogged.
+	mw := middleware.New(middleware.Cfg{
+		PanicRecover: true,
+		Logger:       cfg.Logger,
+		Metrics:      cfg.Metrics,
+	})
+	return mw.Wrap(r), nil
+}
+
+// newRoutes validates the dependencies and mounts every route on a gorilla/mux
+// router. cfg.Logger must be set (New defaults it).
+func newRoutes(cfg Cfg) (*mux.Router, error) {
+	logger := cfg.Logger
 	if cfg.Notes == nil {
 		return nil, errors.New("router: Notes is required")
 	}
@@ -73,16 +95,6 @@ func New(cfg Cfg) (http.Handler, error) {
 	}
 
 	r := mux.NewRouter()
-	// add logging middleware
-	r.Use(func(handler http.Handler) http.Handler {
-		return log.LoggingMiddleware(handler, logger)
-	})
-
-	// add prometheus middleware
-	r.Use(func(handler http.Handler) http.Handler {
-		return prometheus.PromMiddleware(handler)
-	})
-
 	attachApiV0(r, cfg.Notes, cfg.Tags, cfg.Jobs, guard, problems, logger)
 	if cfg.UI != nil {
 		attachUI(r, cfg.UI)
@@ -90,7 +102,6 @@ func New(cfg Cfg) (http.Handler, error) {
 
 	r.NotFoundHandler = notFound(problems)
 	r.MethodNotAllowedHandler = methodNotAllowed(problems)
-
 	return r, nil
 }
 

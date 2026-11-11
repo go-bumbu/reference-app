@@ -72,4 +72,7 @@ See [architecture.md](architecture.md) for the tiers, [database.md](database.md)
 Opt-in (`Observability.Enabled`, default port 9090), on its own port so it can stay off the public interface:
 `/metrics` (Prometheus), `/health`, `/ready`. Both probes are a static `OK` today. When making them real: `ready`
 reflects startup work (caches, migrations); do **not** tie `health` to the database, or one network blip restarts
-every replica. Request metrics come from `libs/middleware/prometheus`, labelled by the route template.
+every replica. Request metrics come from `go-bumbu/http/middleware/metrics`
+(`requests_http_duration_seconds`), created once in `newMainHandler` and only when the observability server is
+enabled. Its route label reads `r.Pattern`, which gorilla/mux never sets, so every request is labelled `unmatched`
+until go-bumbu/http fixes that; the app adds no workaround.
