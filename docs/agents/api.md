@@ -65,6 +65,10 @@ not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsP
 - **Every error is RFC 9457 problem+json** (`go-bumbu/http/problemjson`), including unknown API paths (`404`) and
   wrong methods (`405`). Outside `/api` they stay plain text. `Env.Production: true` switches the writer to masked
   mode: status and instance only.
+- **Every problem is logged unmasked, with a reference.** `withRequestID` (`app/router/requestid.go`) wraps the whole
+  handler: it keeps a well-formed inbound `Request-Id` or generates one, and echoes it on the response. The request
+  log's `req-id`, the problem body's `reference` and the `problem` log line (`logProblem`, `OnProblem` hook: full
+  detail, field errors; error level for 5xx, info otherwise) all carry it, so a masked answer stays traceable.
 - **Internal errors are logged, never returned.** Handlers log the real error and answer a generic
   `500 internal "unexpected error"`.
 

@@ -29,6 +29,9 @@ See [api.md](api.md) for how routes are protected, [features.md](features.md) fo
   loader; enforced by `go-bumbu/userauth`'s `headerauth`). That is the second line of defense: the deployment must
   make the app reachable only through the proxy, and the proxy must strip the identity headers from client requests.
   An empty `TrustedProxies` trusts every peer and is logged as a warning at startup.
+- **`Server.TrustedProxies` is a separate list, with the opposite default.** It only decides which client ip the
+  request log records (`X-Forwarded-For` walked past these proxies); empty trusts no one and logs the direct peer.
+  Behind a proxy, list it in both.
 - **A configured `TenantHeader` fails closed**: a request without it is a `401`, never a silent fall into `default`.
   Without a `TenantHeader`, every user lands in `default`.
 - **Nothing is provisioned from an unauthenticated request.** `Provision` creates tenants; only call it with an

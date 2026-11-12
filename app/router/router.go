@@ -12,10 +12,10 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"net/netip"
 
+	"github.com/go-bumbu/http/middleware"
 	"github.com/go-bumbu/reference-app/app/router/handlers"
-	"github.com/go-bumbu/reference-app/libs/middleware/log"
-	"github.com/go-bumbu/reference-app/libs/middleware/prometheus"
 	"github.com/gorilla/mux"
 )
 
@@ -41,16 +41,48 @@ type Cfg struct {
 	// Production masks the problem+json error bodies: status and instance only,
 	// no internal detail. Sourced from Env.Production.
 	Production bool
+	// Metrics records one observation per request (go-bumbu/http
+	// middleware/metrics); nil records no metrics. It registers in the
+	// Prometheus registry, so app/cmd creates it once per process.
+	Metrics middleware.Observer
+	// TrustedProxies are the reverse proxies in front of the server: the
+	// request log takes the client ip from X-Forwarded-For, skipping these from
+	// the right. Empty logs the direct peer and ignores the header, which any
+	// client can forge.
+	TrustedProxies []netip.Prefix
 }
 
-// New builds the main application handler. It returns an error so that wiring
-// which can fail (e.g. a missing dependency) is reported at startup instead of
-// panicking on the first request.
+// New builds the main application handler: the routes, wrapped in the
+// go-bumbu/http request middleware (request log, metrics, panic recovery), all
+// behind withRequestID, so the request log, the problem log and a problem's
+// reference share one id. It returns an error so that wiring which can fail
+// (e.g. a missing dependency) is reported at startup instead of panicking on the
+// first request.
 func New(cfg Cfg) (http.Handler, error) {
-	logger := cfg.Logger
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
+	if cfg.Logger == nil {
+		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	r, err := newRoutes(cfg)
+	if err != nil {
+		return nil, err
+	}
+	// The middleware wraps the whole router rather than going through r.Use:
+	// gorilla/mux only runs r.Use middleware on a matched route, so 404 and 405
+	// would go unlogged.
+	mw := middleware.New(middleware.Cfg{
+		PanicRecover: true,
+		Logger:       cfg.Logger,
+		Metrics:      cfg.Metrics,
+		RequestID:    requestID,
+		ClientIP:     middleware.ClientIPFromXFF(cfg.TrustedProxies...),
+	})
+	return withRequestID(mw.Wrap(r)), nil
+}
+
+// newRoutes validates the dependencies and mounts every route on a gorilla/mux
+// router. cfg.Logger must be set (New defaults it).
+func newRoutes(cfg Cfg) (*mux.Router, error) {
+	logger := cfg.Logger
 	if cfg.Notes == nil {
 		return nil, errors.New("router: Notes is required")
 	}
@@ -63,7 +95,7 @@ func New(cfg Cfg) (http.Handler, error) {
 	if cfg.Tenants == nil {
 		return nil, errors.New("router: Tenants is required")
 	}
-	problems, err := newProblems(cfg.Production)
+	problems, err := newProblems(cfg.Production, logger)
 	if err != nil {
 		return nil, fmt.Errorf("router: problem writer: %w", err)
 	}
@@ -73,16 +105,7 @@ func New(cfg Cfg) (http.Handler, error) {
 	}
 
 	r := mux.NewRouter()
-	// add logging middleware
-	r.Use(func(handler http.Handler) http.Handler {
-		return log.LoggingMiddleware(handler, logger)
-	})
-
-	// add prometheus middleware
-	r.Use(func(handler http.Handler) http.Handler {
-		return prometheus.PromMiddleware(handler)
-	})
-
+	r.Use(reportRoute)
 	attachApiV0(r, cfg.Notes, cfg.Tags, cfg.Jobs, guard, problems, logger)
 	if cfg.UI != nil {
 		attachUI(r, cfg.UI)
@@ -90,8 +113,23 @@ func New(cfg Cfg) (http.Handler, error) {
 
 	r.NotFoundHandler = notFound(problems)
 	r.MethodNotAllowedHandler = methodNotAllowed(problems)
-
 	return r, nil
+}
+
+// reportRoute hands gorilla's matched path template (e.g. "/api/v0/notes/{noteId}")
+// to the request middleware, which labels the request metrics with it. gorilla/mux
+// does not set r.Pattern, so without it every request would record as "unmatched".
+// gorilla runs r.Use middleware only after a match, so 404 and 405 report nothing
+// and stay "unmatched" — the raw path is never used as a label.
+func reportRoute(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if route := mux.CurrentRoute(req); route != nil {
+			if tmpl, err := route.GetPathTemplate(); err == nil {
+				middleware.SetRoute(req, tmpl)
+			}
+		}
+		next.ServeHTTP(w, req)
+	})
 }
 
 // attachUI mounts the web UI as the catch-all of every GET and HEAD outside the

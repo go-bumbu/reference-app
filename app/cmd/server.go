@@ -11,6 +11,8 @@ import (
 	"github.com/go-bumbu/db/gormdb"
 	"github.com/go-bumbu/db/gormdb/postgres"
 	"github.com/go-bumbu/db/gormdb/sqlite"
+	"github.com/go-bumbu/http/middleware"
+	"github.com/go-bumbu/http/middleware/metrics"
 	"github.com/go-bumbu/reference-app/app/logger"
 	"github.com/go-bumbu/reference-app/app/metainfo"
 	"github.com/go-bumbu/reference-app/app/router"
@@ -172,9 +174,24 @@ func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, err
 		return nil, fmt.Errorf("config Auth: %w", err)
 	}
 	logAuthMode(l, authCfg)
+	// Validated by getAppCfg; the error only guards a config that bypassed it.
+	proxies, err := parseTrustedProxies(cfg.Server.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("config Server: %w", err)
+	}
 	ui, err := spa.Handler()
 	if err != nil {
 		return nil, fmt.Errorf("init web UI: %w", err)
+	}
+	// Request metrics are only recorded when the observability server is there
+	// to expose them on /metrics. The observer registers in the Prometheus
+	// default registry, so it is created once per process, here.
+	var reqMetrics middleware.Observer
+	if cfg.Obs.Enabled {
+		reqMetrics, err = metrics.NewObserver(metrics.Cfg{})
+		if err != nil {
+			return nil, fmt.Errorf("init request metrics: %w", err)
+		}
 	}
 	h, err := router.New(router.Cfg{
 		Logger:     l,
@@ -185,6 +202,9 @@ func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, err
 		Auth:       authCfg,
 		UI:         ui,
 		Production: cfg.Env.Production,
+		Metrics:    reqMetrics,
+		// TrustedProxies: the reverse proxies whose X-Forwarded-For the request log trusts.
+		TrustedProxies: proxies,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize main app handler: %w", err)

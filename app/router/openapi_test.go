@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -115,17 +116,13 @@ func (d testDeps) actorFor(t *testing.T, tenant, subject string) notes.Actor {
 	return notes.Actor{TenantID: p.TenantID, UserID: p.UserID}
 }
 
-func newTestRouter(t *testing.T, d testDeps, production bool, auth AuthCfg) *mux.Router {
+func newTestRouter(t *testing.T, d testDeps, production bool, auth AuthCfg) http.Handler {
 	t.Helper()
 	h, err := New(Cfg{Notes: d.notes, Tags: d.notes, Jobs: d.jobs, Tenants: d.tenants, Production: production, Auth: auth})
 	if err != nil {
 		t.Fatalf("router.New: %v", err)
 	}
-	r, ok := h.(*mux.Router)
-	if !ok {
-		t.Fatalf("router.New returned %T, want *mux.Router", h)
-	}
-	return r
+	return h
 }
 
 func TestOpenAPICoversAllRoutes(t *testing.T) {
@@ -138,8 +135,14 @@ func TestOpenAPICoversAllRoutes(t *testing.T) {
 		}
 	}
 
+	// walk the routes themselves: New returns them wrapped in the middleware
+	d := newDeps(t)
+	routes, err := newRoutes(Cfg{Logger: slog.New(slog.DiscardHandler), Notes: d.notes, Tags: d.notes, Jobs: d.jobs, Tenants: d.tenants})
+	if err != nil {
+		t.Fatal(err)
+	}
 	mounted := map[string]bool{}
-	err := newTestRouter(t, newDeps(t), false, AuthCfg{}).Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
+	err = routes.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		tpl, err := route.GetPathTemplate()
 		if err != nil || !strings.HasPrefix(tpl, apiV0MountPrefix+"/") {
 			return nil //nolint:nilerr // routes without a template (or outside the API) are not part of the contract

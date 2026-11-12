@@ -257,6 +257,26 @@ func TestGetAppCfgAuth(t *testing.T) {
 	}
 }
 
+// TestGetAppCfgServerTrustedProxies covers Server.TrustedProxies: empty by
+// default (the request log uses the direct peer), validated on load.
+func TestGetAppCfgServerTrustedProxies(t *testing.T) {
+	cfg, err := getAppCfg("", false)
+	if err != nil {
+		t.Fatalf("getAppCfg: %v", err)
+	}
+	if len(cfg.Server.TrustedProxies) != 0 {
+		t.Errorf("default: got %v, want none", cfg.Server.TrustedProxies)
+	}
+
+	file := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(file, []byte("Server:\n  TrustedProxies: [\"10.0.0.0/33\"]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := getAppCfg(file, true); err == nil {
+		t.Fatal("expected an invalid Server.TrustedProxies to fail the load")
+	}
+}
+
 // TestRunServerWiresTheRouter runs the real composition root up to the router.
 // With "oidc" router.New refuses to start; it checks its dependencies first, so
 // getting ErrOIDCNotImplemented proves runServer passed all of them in.

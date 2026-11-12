@@ -8,6 +8,10 @@ Server:
   Port: 8080
   # All interfaces: inside a container loopback is unreachable from the host.
   BindIp: "0.0.0.0"
+  # Reverse proxies in front of the container (CIDRs or bare IPs): the request
+  # log takes the client ip from their X-Forwarded-For. Empty logs the direct
+  # peer, e.g. the proxy or the docker bridge gateway.
+  TrustedProxies: []
 
 Observability:
   Enabled: false

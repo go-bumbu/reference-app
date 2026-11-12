@@ -9,6 +9,10 @@
 Server:
   Port: 8081
   BindIp: "localhost"
+  # Reverse proxies in front of the server (CIDRs or bare IPs). The request log
+  # takes the client ip from X-Forwarded-For past them; empty logs the direct
+  # peer. Unlike Auth.ProxyHeader.TrustedProxies, empty trusts no one.
+  TrustedProxies: []
 
 # Observability endpoints (metrics, health, ready). Off by default; when enabled,
 # keep it off the public interface.

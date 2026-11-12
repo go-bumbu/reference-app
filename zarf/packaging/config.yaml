@@ -14,6 +14,11 @@ Server:
   # Authelia) on the same host in front of it. Do not bind a public interface
   # while Auth.Method is "none".
   BindIp: "127.0.0.1"
+  # The co-located proxy: the request log takes the client ip from its
+  # X-Forwarded-For. Empty logs the proxy's address (it trusts no one).
+  TrustedProxies:
+    - "127.0.0.1"
+    - "::1"
 
 # Observability endpoints (metrics, health, ready). Off by default; when enabled,
 # keep it off the public interface.
