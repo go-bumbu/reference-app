@@ -38,6 +38,12 @@ type Env struct {
 type serverCfg struct {
 	BindIp string
 	Port   int
+	// TrustedProxies are the CIDRs or bare IPs of the reverse proxies in front
+	// of the server. The request log takes the client ip from X-Forwarded-For,
+	// skipping these from the right. Empty logs the direct peer and ignores the
+	// header, which any client can forge. Unlike Auth.ProxyHeader.TrustedProxies,
+	// empty trusts no one.
+	TrustedProxies []string
 }
 
 func (c serverCfg) Addr() string {
@@ -260,6 +266,9 @@ func getAppCfg(file string, mandatory bool) (AppCfg, error) {
 	cfg.Msgs = configMsg
 	if err != nil {
 		return cfg, fmt.Errorf("load config: %w", err)
+	}
+	if _, err := parseTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return cfg, fmt.Errorf("config Server: %w", err)
 	}
 	if err := normalizeDBCfg(&cfg.DB); err != nil {
 		return cfg, fmt.Errorf("config DB: %w", err)

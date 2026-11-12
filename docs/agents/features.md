@@ -20,12 +20,14 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 | Run history per tenant | Partial | `HistorySize` is shared by every tenant: a busy tenant pushes out the others' old runs and their logs |
 | Missed schedule fires replayed after a restart | Not implemented, by tempo's design | a fire due while the server was down is skipped |
 | Jobs across several server processes | Not implemented | one process per database and log directory: tempo's queue and scheduler hold within one process |
-| Request logging, panic recovery, Prometheus request metrics | Implemented | `go-bumbu/http/middleware` wrapping the whole router in `router.New`; metrics only with `Observability.Enabled`. Route label is `unmatched` for every request until go-bumbu/http supports gorilla/mux route templates |
+| Request logging, panic recovery, Prometheus request metrics | Implemented | `go-bumbu/http/middleware` wrapping the whole router in `router.New`; metrics only with `Observability.Enabled`, labelled by gorilla route template (`reportRoute`), `unmatched` for 404/405 |
 | REST API `/api/v0`: `info`, `me`, notes list / create / get / update / delete | Implemented | `app/router/api_v0.go` — [api.md](api.md) |
 | Tags: one tree per tenant, any number per note, notes listed by tag (subtree included) | Implemented | `internal/notes/tags.go`, `tagstore.go` (closure table via `go-bumbu/closure-tree`); `/tags`, `/notes/{id}/tags/{tagId}`, `GET /notes?tag=` |
 | Tag groups (several trees, codex's media) and tag facets / counts | Not implemented, by design | one tree of tags for notes; the sidebar is a plain tree, no per-tag counts |
 | Notes list pagination | Not implemented | `List` returns the whole tenant in one page; the UI's search filters on the client |
 | RFC 9457 problem+json errors, masked in production | Implemented | `go-bumbu/http/problemjson`; `Env.Production` |
+| Request ids, unmasked problem log | Implemented | `withRequestID` (`app/router/requestid.go`): `req-id` in the request log = problem `reference` = `Request-Id` response header; `logProblem` logs every problem in full |
+| Client ip behind a reverse proxy | Implemented | `Server.TrustedProxies` → `middleware.ClientIPFromXFF`; empty logs the direct peer |
 | OpenAPI contract tests + spectral lint | Implemented | `app/router/openapi_test.go`, `make spec-lint` |
 | Go API client | Implemented | `libs/client` |
 | SQLite (default) / Postgres persistence | Implemented | `github.com/go-bumbu/db/gormdb` — [database.md](database.md) |

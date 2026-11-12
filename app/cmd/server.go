@@ -174,6 +174,11 @@ func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, err
 		return nil, fmt.Errorf("config Auth: %w", err)
 	}
 	logAuthMode(l, authCfg)
+	// Validated by getAppCfg; the error only guards a config that bypassed it.
+	proxies, err := parseTrustedProxies(cfg.Server.TrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("config Server: %w", err)
+	}
 	ui, err := spa.Handler()
 	if err != nil {
 		return nil, fmt.Errorf("init web UI: %w", err)
@@ -198,6 +203,8 @@ func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, err
 		UI:         ui,
 		Production: cfg.Env.Production,
 		Metrics:    reqMetrics,
+		// TrustedProxies: the reverse proxies whose X-Forwarded-For the request log trusts.
+		TrustedProxies: proxies,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize main app handler: %w", err)

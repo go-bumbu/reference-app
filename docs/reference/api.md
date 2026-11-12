@@ -106,7 +106,10 @@ cannot log it or explain it. A multi-select of a few hundred items is enough to 
 Put a `requestID` middleware **first** in the chain. It keeps an inbound `Request-Id` (the proxy may set one) or
 creates a short random id, stores it on the request for the logger and the problem writer, and echoes it on the
 response. Set `problemjson.Cfg.RequestID` to read it back, so a masked production error still carries a `reference`
-that matches the full server log line. *(aether: `app/router/requestid.go`)*
+that matches the full server log line. Set `problemjson.Cfg.OnProblem` to log the unmasked problem (detail, field
+errors, upstream reason) under that reference: the masked body omits all of it. Give the request middleware the same
+id (`middleware.Cfg.RequestID`) so the request log's `req-id` matches too. Only keep an inbound id that is short and
+made of safe characters; generate one otherwise. *(aether, reference-app: `app/router/requestid.go`, `logProblem`)*
 
 ## Calling third-party services
 

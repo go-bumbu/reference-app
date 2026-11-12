@@ -53,8 +53,8 @@ github.com/go-bumbu/config v0.5.0 h1:HhKdNXYv4VlUC87yTSo3GU2AC9NIntzORZQP5DzNtyE
 github.com/go-bumbu/config v0.5.0/go.mod h1:+7x+YHBelQapKLZX5wTp23TSb8SRlk2KIXoQjCPXWjI=
 github.com/go-bumbu/db v0.1.0 h1:cDreubgGZXpJMwzd2e/R4RyLM0u4+MAP9RwXO3NpNhU=
 github.com/go-bumbu/db v0.1.0/go.mod h1:xcK5GnGCwt5RDPi97JNGdTziT34VNUHIqDb6eZGt8J4=
-github.com/go-bumbu/http v0.6.0 h1:APxeM3T3GGfoYdjIwyUOdtqYU1XHodrMUJ6fI1dlfSg=
-github.com/go-bumbu/http v0.6.0/go.mod h1:/8vI7kGIgHhCt7CtkiyGnOgUx5HQdPN9OcOFG7ln3xQ=
+github.com/go-bumbu/http v0.7.0 h1:nrXchga3fp2ifk3tTpPo0X8NW/f0CFc4YfMICh+S9dI=
+github.com/go-bumbu/http v0.7.0/go.mod h1:/8vI7kGIgHhCt7CtkiyGnOgUx5HQdPN9OcOFG7ln3xQ=
 github.com/go-bumbu/tempo v0.4.3 h1:e1UQIIEzGQNXmE3m9xZtmZ1WsPBpqEz5CtrrYkLfqVA=
 github.com/go-bumbu/tempo v0.4.3/go.mod h1:QSOHvoaaybGMK5AnlT6D9EIRmeg5S3R0+TaxGUX171A=
 github.com/go-bumbu/testdbs v0.3.0 h1:oQUy5HbdMdcdAk9+EOLZHoWeHQeKFbhXh5c0h9PmQEI=

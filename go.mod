@@ -7,7 +7,7 @@ require (
 	github.com/go-bumbu/closure-tree v0.10.0
 	github.com/go-bumbu/config v0.5.0
 	github.com/go-bumbu/db v0.1.0
-	github.com/go-bumbu/http v0.6.0
+	github.com/go-bumbu/http v0.7.0
 	github.com/go-bumbu/tempo v0.4.3
 	github.com/go-bumbu/testdbs v0.3.0
 	github.com/go-bumbu/userauth v0.8.0

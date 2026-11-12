@@ -21,8 +21,10 @@ const problemBaseURI = "https://reference-app.local/probs" // TODO replace with 
 const slugMethodNotAllowed = "method_not_allowed"
 
 // newProblems returns the problem+json Writer. production masks the bodies:
-// no internal detail reaches the client.
-func newProblems(production bool) (*problemjson.Writer, error) {
+// no internal detail reaches the client. Every problem carries the request id
+// as its reference and is logged unmasked by logProblem, so a masked answer a
+// user reports can be traced to its detail.
+func newProblems(production bool, logger *slog.Logger) (*problemjson.Writer, error) {
 	mode := problemjson.ModeDev
 	if production {
 		mode = problemjson.ModeMasked
@@ -34,8 +36,39 @@ func newProblems(production bool) (*problemjson.Writer, error) {
 			handlers.SlugQueueFull:  "Job queue full",
 			slugMethodNotAllowed:    "Method not allowed",
 		},
-		Mode: mode,
+		Mode:      mode,
+		RequestID: requestID,
+		OnProblem: logProblem(logger),
 	})
+}
+
+// logProblem logs every problem with its full, unmasked detail: at error for a
+// 5xx, at info otherwise. The reference matches the req-id of the request log
+// line and the reference in the body the client got.
+func logProblem(logger *slog.Logger) func(*http.Request, problemjson.Problem) {
+	return func(r *http.Request, p problemjson.Problem) {
+		attrs := []slog.Attr{
+			slog.Int("status", p.Status),
+			slog.String("type", p.Type),
+			slog.String("detail", p.Detail),
+			slog.String("url", r.URL.EscapedPath()),
+			slog.String("reference", p.Reference),
+		}
+		for _, f := range p.Errors {
+			attrs = append(attrs, slog.String("field "+f.Pointer, f.Detail))
+		}
+		if p.Reason != "" {
+			attrs = append(attrs, slog.String("reason", p.Reason))
+		}
+		if p.Err != nil {
+			attrs = append(attrs, slog.String("error", p.Err.Error()))
+		}
+		level := slog.LevelInfo
+		if p.Status >= http.StatusInternalServerError {
+			level = slog.LevelError
+		}
+		logger.LogAttrs(r.Context(), level, "problem", attrs...)
+	}
 }
 
 // attachApiV0 mounts the /api/v0 routes. Every route here must be documented in
