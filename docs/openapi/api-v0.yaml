@@ -40,12 +40,29 @@ info:
     works on the caller's tenant only, and its runs, logs and schedules belong
     to that tenant: another tenant's do not exist for the caller (`404`). Run
     and schedule ids are UUID strings, not the 16 hex chars of a note id.
+
+
+    API keys let a script or another program use the API without the proxy's
+    login, in `proxy` mode only. A signed-in user creates them under
+    `/api-keys`; each grants `<area>:read` or `<area>:write` (write includes
+    read). A key is sent as `Authorization: Bearer <key>` to the second server,
+    `/api/key/v0`: the same operations, where only the key authenticates and
+    identity headers are ignored. An operation a key may use lists `apiKey` in
+    its `security`, and the scope it needs in `x-api-key-scope` (none: any
+    valid key); any other answers `403` there, as does one whose area or level
+    the key lacks. Every invalid key is the same `401`.
 servers:
   - url: /api/v0
     description: >
       Every path below is mount-relative. The base is modelled exclusively
       through this `servers` entry, so bumping the version prefix stays a
-      one-line change, with no path or operationId edits.
+      one-line change, with no path or operationId edits. The signed-in
+      user's mount, behind the auth proxy.
+  - url: /api/key/v0
+    description: >
+      The same API for API keys (`Authorization: Bearer <key>`), in `proxy`
+      mode only. The proxy lets this path through without a login; the server
+      ignores identity headers on it.
 tags:
   - name: info
     description: Build and runtime information about the server.
@@ -62,6 +79,10 @@ tags:
       Background jobs of the caller's tenant: start a run, follow its progress
       and log, cancel it, and run a job on cron schedules. Backed by the
       `internal/jobs` module.
+  - name: api-keys
+    description: >
+      The signed-in user's API keys. Served in `proxy` mode only, and never to
+      an API key.
 
 paths:
   /info:
@@ -84,6 +105,7 @@ paths:
     get:
       operationId: getMe
       tags: [identity]
+      security: [{}, {apiKey: []}]
       summary: Get the caller
       description: >
         Returns the authenticated caller: their user and tenant, created on the
@@ -104,6 +126,8 @@ paths:
     get:
       operationId: listNotes
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:read
       summary: List notes
       description: >
         Returns the notes of the caller's tenant, newest first. With `tagId`,
@@ -130,11 +154,15 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/Internal'
     post:
       operationId: createNote
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:write
       summary: Create a note
       description: >
         Creates a note in the caller's tenant; the id, the author and the
@@ -161,6 +189,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/ValidationError'
         '500':
@@ -172,6 +202,8 @@ paths:
     get:
       operationId: getNote
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:read
       summary: Get a note
       description: Returns a single note of the caller's tenant by id.
       responses:
@@ -183,6 +215,8 @@ paths:
                 $ref: '#/components/schemas/Note'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -190,6 +224,8 @@ paths:
     put:
       operationId: updateNote
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:write
       summary: Update a note
       description: >
         Replaces the title and body of a note of the caller's tenant. Any user
@@ -212,6 +248,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -221,6 +259,8 @@ paths:
     delete:
       operationId: deleteNote
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:write
       summary: Delete a note
       description: >
         Deletes a note of the caller's tenant. Any user of the tenant may
@@ -230,6 +270,8 @@ paths:
           description: The note was deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -242,6 +284,8 @@ paths:
     put:
       operationId: addNoteTag
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:write
       summary: Tag a note
       description: >
         Gives the note the tag. Idempotent: a note that carries the tag already
@@ -256,6 +300,8 @@ paths:
                 $ref: '#/components/schemas/Note'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NoteOrTagNotFound'
         '500':
@@ -263,6 +309,8 @@ paths:
     delete:
       operationId: removeNoteTag
       tags: [notes]
+      security: [{}, {apiKey: []}]
+      x-api-key-scope: notes:write
       summary: Untag a note
       description: >
         Takes the tag off the note. Idempotent: a note that does not carry the
@@ -276,6 +324,8 @@ paths:
                 $ref: '#/components/schemas/Note'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NoteOrTagNotFound'
         '500':
@@ -299,6 +349,8 @@ paths:
                 $ref: '#/components/schemas/TagList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/Internal'
     post:
@@ -333,6 +385,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/TagNameTaken'
         '422':
@@ -369,6 +423,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
@@ -389,6 +445,8 @@ paths:
           description: The tag and its subtree were deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -411,6 +469,8 @@ paths:
                 $ref: '#/components/schemas/JobList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/Internal'
 
@@ -445,6 +505,8 @@ paths:
                 $ref: '#/components/schemas/JobRun'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '429':
@@ -485,6 +547,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -520,6 +584,8 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -536,6 +602,8 @@ paths:
           description: The schedule was deleted.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -560,6 +628,8 @@ paths:
                 $ref: '#/components/schemas/JobRunList'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '500':
           $ref: '#/components/responses/Internal'
 
@@ -580,6 +650,8 @@ paths:
                 $ref: '#/components/schemas/JobRun'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -600,6 +672,8 @@ paths:
           description: The run is not waiting or running any more.
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
@@ -637,13 +711,139 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /api-keys:
+    get:
+      operationId: listApiKeys
+      tags: [api-keys]
+      summary: List the caller's API keys
+      description: >
+        Returns the caller's own API keys, oldest first, without their tokens.
+        A key whose scopes the server no longer knows is listed as not
+        `usable`, so it can be revoked.
+      responses:
+        '200':
+          description: The caller's keys.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+    post:
+      operationId: createApiKey
+      tags: [api-keys]
+      summary: Create an API key
+      description: >
+        Creates an API key of the caller with the given scopes. The response
+        is the only time the token is shown. Without `expiresAt` the key
+        expires one year from now.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiKeyInput'
+      responses:
+        '201':
+          description: The key, with its token.
+          headers:
+            Location:
+              description: Path of the new key.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: The caller has as many keys as allowed; revoke one first.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /api-keys/scopes:
+    get:
+      operationId: listApiKeyScopes
+      tags: [api-keys]
+      summary: List the scopes a key can be granted
+      description: >
+        Returns every area an API key can be granted, each at `read` or
+        `write`: the areas the server's operations declare.
+      responses:
+        '200':
+          description: The grantable scopes.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyScopeList'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/Internal'
+
+  /api-keys/{keyId}:
+    parameters:
+      - $ref: '#/components/parameters/KeyId'
+    delete:
+      operationId: revokeApiKey
+      tags: [api-keys]
+      summary: Revoke an API key
+      description: >
+        Revokes one of the caller's API keys; it stops working at once.
+        Another user's key does not exist for the caller (`404`).
+      responses:
+        '204':
+          description: The key was revoked.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/Internal'
 
 components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: >
+        An API key, on the `/api/key/v0` server only. An operation's
+        `x-api-key-scope` is the scope the key must grant.
   parameters:
+    KeyId:
+      name: keyId
+      in: path
+      required: true
+      description: Id of the API key (`ApiKey.id`).
+      schema:
+        type: string
+        maxLength: 64
     NoteId:
       name: noteId
       in: path
@@ -743,6 +943,142 @@ components:
           type: string
           description: Slug of the caller's tenant.
           examples: [default]
+        apiKey:
+          $ref: '#/components/schemas/MeApiKey'
+
+    MeApiKey:
+      type: object
+      additionalProperties: false
+      description: The API key the request was made with; only on the `/api/key/v0` server.
+      required: [id, name, scopes]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        scopes:
+          type: array
+          items:
+            type: string
+          examples: [[notes:read]]
+
+    ApiKey:
+      type: object
+      additionalProperties: false
+      required: [id, name, scopes, usable, createdAt, lastUsedAt, expiresAt]
+      properties:
+        id:
+          type: string
+          description: Id of the key; also the middle part of its token.
+        name:
+          type: string
+          description: The name its creator gave it.
+        scopes:
+          type: array
+          description: What the key grants, sorted; empty when it is not `usable`.
+          items:
+            type: string
+          examples: [[notes:write]]
+        usable:
+          type: boolean
+          description: >
+            False when the key's stored scopes name something the server no
+            longer knows: such a key authenticates nothing.
+        createdAt:
+          type: string
+          format: date-time
+        lastUsedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Last time the key authenticated a request (updated at most hourly); null if never.
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the key stops working; null for a key that never expires.
+
+    ApiKeyCreated:
+      type: object
+      additionalProperties: false
+      description: >
+        A key just created: the fields of `ApiKey` plus its token, the only
+        time the token is shown.
+      required: [id, name, scopes, usable, createdAt, lastUsedAt, expiresAt, token]
+      properties:
+        id:
+          $ref: '#/components/schemas/ApiKey/properties/id'
+        name:
+          $ref: '#/components/schemas/ApiKey/properties/name'
+        scopes:
+          $ref: '#/components/schemas/ApiKey/properties/scopes'
+        usable:
+          $ref: '#/components/schemas/ApiKey/properties/usable'
+        createdAt:
+          $ref: '#/components/schemas/ApiKey/properties/createdAt'
+        lastUsedAt:
+          $ref: '#/components/schemas/ApiKey/properties/lastUsedAt'
+        expiresAt:
+          $ref: '#/components/schemas/ApiKey/properties/expiresAt'
+        token:
+          type: string
+          description: 'The key to send as `Authorization: Bearer <token>`.'
+          examples: [refapp_k3j5h2g9a1_Xr8...]
+
+    ApiKeyList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKey'
+
+    ApiKeyInput:
+      type: object
+      additionalProperties: false
+      required: [name, scopes]
+      properties:
+        name:
+          type: string
+          description: 1 to 100 characters after trimming.
+          examples: [backup script]
+        scopes:
+          type: array
+          description: >
+            `<area>:read` or `<area>:write` of the areas `GET /api-keys/scopes`
+            lists, each area at most once; at least one.
+          minItems: 1
+          items:
+            type: string
+          examples: [[notes:read]]
+        expiresAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the key stops working, in the future; absent or null means one year from now.
+
+    ApiKeyScope:
+      type: object
+      additionalProperties: false
+      required: [area, levels]
+      properties:
+        area:
+          type: string
+          examples: [notes]
+        levels:
+          type: array
+          items:
+            type: string
+            enum: [read, write]
+
+    ApiKeyScopeList:
+      type: object
+      additionalProperties: false
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKeyScope'
 
     Note:
       type: object
@@ -1077,7 +1413,22 @@ components:
     Unauthorized:
       description: >
         The caller is not authenticated: no identity was asserted, or it came
-        from an untrusted peer.
+        from an untrusted peer; on `/api/key/v0`, the API key is missing or
+        not valid (every reason gets the same answer).
+      headers:
+        WWW-Authenticate:
+          description: '`Bearer realm="api"`, on `/api/key/v0` only.'
+          schema:
+            type: string
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Forbidden:
+      description: >
+        Only on `/api/key/v0`: the API key may not use this operation (it is
+        not open to keys, or the key lacks its area or level), or the operation
+        refuses API keys.
       content:
         application/problem+json:
           schema:

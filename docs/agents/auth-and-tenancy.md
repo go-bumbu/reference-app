@@ -8,7 +8,7 @@ See [api.md](api.md) for how routes are protected, [features.md](features.md) fo
 | `Auth.Method` | Who the caller is |
 |---|---|
 | `none` (default) | every request is user `admin` of tenant `default`; demos and local development only, logged as a warning |
-| `proxy` | a reverse proxy (Authelia, oauth2-proxy, ...) asserts the user in `ProxyHeader.UserHeader` and, optionally, the tenant in `TenantHeader` |
+| `proxy` | a reverse proxy (Authelia, oauth2-proxy, ...) asserts the user in `ProxyHeader.UserHeader` and, optionally, the tenant in `TenantHeader`; on `/api/key/v0`, an API key the user created (below) |
 | `oidc` | reserved; the config loader accepts it, `router.New` returns `ErrOIDCNotImplemented`, so `start` fails |
 
 ## Request flow
@@ -22,6 +22,32 @@ See [api.md](api.md) for how routes are protected, [features.md](features.md) fo
   cycle. `IdentityFrom` returning `ok=false` in a protected handler is a wiring bug → `500`.
 - The slug and subject on `Identity` are for display only; **scope by `TenantID` / `UserID`, never by slug or
   subject.**
+
+## API keys (`proxy` mode)
+
+A signed-in user creates API keys (`/api-keys`, Settings → API keys) so a script can use the API without the proxy's
+login. A key is a personal access token of `go-bumbu/userauth`'s `service/pat` (hashed at rest, prefixed with the app
+name, table `user_pats`), owned by the user's ID, built in `app/cmd/apikeys.go` only when `Auth.Method` is `proxy`.
+
+    /api/v0/...      ─► guard.protect ─► proxy identity → Provision → handler          (never reads Authorization)
+    /api/key/v0/...  ─► keyGuard      ─► Bearer key → pat.Verify → scopes → owner →    (never reads identity headers)
+                                         rule check (403) → Identity + reqctx.Key → the same handler
+
+- **Two mounts, one credential each.** Every protected route is registered on both by `apiMount.protected`; the key
+  mount exists only with keys on. The proxy must let `^/api/key/` through without a login, and nothing else; on that
+  path any identity header is the client's own claim, so the key guard never calls `headerauth`.
+- **Each route declares its key rule on its registration line** (`keyscope.Closed()`, `AnyKey()` for `/me`,
+  `Area("notes")` at the level the method implies: GET/HEAD read, else write). Closed is the zero value, so a route
+  is closed to keys unless it says otherwise; a closed route still exists on the key mount and answers `403`.
+- **The grantable scopes are the declared areas** (`keyscope.Registry`, `GET /api-keys/scopes`). A malformed area
+  fails `router.New`. A stored scope the app no longer knows makes the key unusable (`401`), not half honoured; it is
+  still listed, `usable: false`, so its owner can revoke it.
+- **Every bad key is the same `401`** ("a valid API key is required"): missing, malformed, unknown, wrong secret,
+  expired, revoked, unknown scope, owner gone. A key on a route it may not use is a `403` saying what it lacks.
+- **A key's tenant is its owner's** (`tenants.PrincipalByUserID`); a key request never provisions anything.
+- **Keys never manage keys**: `/api-keys` is closed on the key mount, and the handler refuses a keyed request too.
+- **Keys expire after a year by default** (`handlers.DefaultAPIKeyLifetime`): JIT provisioning never learns that a
+  user left, and the app has no disabled users. `pat` limits a user to 25 keys (`409`).
 
 ## Invariants
 
@@ -50,6 +76,8 @@ See [api.md](api.md) for how routes are protected, [features.md](features.md) fo
 ## Tests that guard this
 
 `app/router/auth_test.go` (`TestAuthProxy`, `TestTenantIsolationOverHTTP`, `TestProvisionFailureIsInternal`),
+`app/router/apikeys_test.go` (`TestAPIKeyBadKeysLookAlike`, `TestAPIKeyScopePolicy`, `TestAPIKeyMountsStayApart`,
+`TestAPIKeyTenantIsolation`), `TestOpenAPIKeyScopes` (each route's rule matches the spec), `libs/keyscope`,
 `internal/notes` (`TestTenantIsolation`, `TestNoTenantFailsClosed`), `internal/tenants` (`TestProvisionIsolation`,
 `TestProvisionConcurrentFirstLogin`). A new tenant-scoped module copies the two notes tests.
 

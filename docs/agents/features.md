@@ -35,6 +35,10 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 | Multi-tenancy, just-in-time tenant + user provisioning | Implemented | `internal/tenants`, auth guard — [auth-and-tenancy.md](auth-and-tenancy.md) |
 | Auth `none` (fixed `admin` of `default`) | Implemented | demos and local development only |
 | Auth `proxy` (trusted reverse-proxy headers) | Implemented | `app/router/auth.go` via `go-bumbu/userauth/headerauth` |
+| API keys: user-created, scoped `<area>:read`/`write`, on a key-only mount `/api/key/v0` | Implemented, `proxy` mode only | `libs/keyscope`, `app/router/keyauth.go`, `handlers/apikeys.go`, keys in `go-bumbu/userauth`'s `pat` (table `user_pats`) — [auth-and-tenancy.md](auth-and-tenancy.md); only `notes` is open to keys, tags / jobs / key management are closed |
+| API keys in `none` mode, per-action scopes, keys owned by a tenant or a service account | Not implemented, by design | keys need a real user behind the proxy; scopes are one read/write level per area |
+| API keys from a browser on another origin (CORS) | Not implemented | no CORS or preflight handling; a script, the Go client or a browser extension with host permissions is unaffected |
+| Web UI settings: API keys | Implemented | `webui/src/views/settings/ApiKeysView.vue`, `components/apikeys/`, after codex's: list, create (token shown once), revoke; hidden when the server offers no keys |
 | Auth `oidc` | Not implemented | reserved: config accepts it, `router.New` refuses it, so `start` fails |
 | Login forms, passwords, sessions | DIY by design | delegated to the reverse proxy / identity provider |
 | Tenant / user administration API | Not implemented | tenants and users only appear through provisioning |

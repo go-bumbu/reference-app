@@ -22,7 +22,8 @@ See [api.md](api.md) for the contract it consumes.
 | `src/components/NoteDialog.vue` | the note form, in a dialog: blank, it creates (the top bar's **Add note**, from any page); given a `note`, it edits that note (the note page's **Edit**). `NotesView` is a read-only card grid |
 | `src/components/SearchField.vue` | the top-bar search input; the shell binds it to the `?q=` query parameter |
 | `src/composables/useSidebar.ts`, `useTheme.ts` | module-level UI preferences kept in `localStorage`: sidebar collapsed; light / dark / auto mode and accent theme (`src/theme.ts` holds the palettes) |
-| `src/views/settings/`, `src/components/settings/` | the settings, after codex: `SettingsShell` (title + left nav) around Appearance (theme, mode), Jobs and About; the shell hides the tags rail there |
+| `src/views/settings/`, `src/components/settings/` | the settings, after codex: `SettingsShell` (title + left nav) around Appearance (theme, mode), Jobs, API keys (listed only when `GET /api-keys/scopes` is not a `404`) and About; the shell hides the tags rail there |
+| `src/views/settings/ApiKeysView.vue`, `src/components/apikeys/`, `src/lib/apiKeys.ts` | the API keys page, after codex's: the caller's keys (access, last used, expiry, an Expired / Unusable tag), revoke with a confirmation; `ApiKeyCreateDialog` takes a name, a None / Read / Read & write choice per area from `GET /api-keys/scopes` and an expiry (a year ahead by default), then shows the token once with a copy button. A `404` from the scopes means the server offers no keys: the page says so and the sidebar hides it (`useApiKeysEnabled`) |
 | `src/views/settings/JobsView.vue`, `src/components/jobs/`, `src/lib/jobs.ts` | the jobs page, after aether's Tasks page: a Jobs tab (each job's last run or live stage, schedule summary, **Run now** that turns into the run's progress; a `200` answer toasts "Already in progress") and a Runs tab (`JobRunsTable`: status counts, cancel a waiting or running run, a row opens `JobRunLogDialog`). `JobScheduleDialog` lists, adds, edits and removes the job's schedules, with 6-field presets and a `422` shown under the cron field. `lib/jobs.ts` holds the pure helpers (status labels, progress text, the latest run per job) |
 | `src/views/NoteView.vue` | one note, after codex's file and wiki pages: a read-only A4 sheet with a details card on its right, Edit / Delete at the card's foot, and a Tags card below it (each tag a link to its notes, Edit opens `TagsDialog` for the note). Edit opens `NoteDialog` (no in-place editing); delete asks through the shell's `ConfirmDialog` |
 | `src/views/NotesView.vue` | the card grid, narrowed by `?tag=` on the server and by `?q=` on the client; each card shows its tags and drags as a note |
@@ -67,6 +68,8 @@ See [api.md](api.md) for the contract it consumes.
 
 - `make ui-prepare` once, then `make run` in one terminal and `make ui-dev` in another: Vite hot reload, proxying
   `/api` to `BACKEND_URL` (default `http://localhost:8081`, the `make run` port).
-- With the backend in `proxy` mode, the dev server plays the proxy: `DEV_USER=alice DEV_TENANT=acme npm run dev`
-  (in `webui/`) sends them as `Remote-User` / `Remote-Tenant` — keep those names in step with `zarf/config.yaml`.
+- `make run` starts the backend in `proxy` mode (`RUN_AUTH`, default `proxy`), and the dev server plays the proxy: it
+  sends `DEV_USER` / `DEV_TENANT` (default `admin` / `default`, the demo data's user; an empty value sends none) as
+  `Remote-User` / `Remote-Tenant` — keep those names in step with `zarf/config.yaml`. Like a real proxy it passes
+  `/api/key` through untouched. `make run-ui` serves the embedded UI on `:8081` with no proxy, so it runs `none`.
 - `make ui-test` runs `vue-tsc --noEmit` and `vitest run`; it is part of `make verify` and the `webui` workflow.

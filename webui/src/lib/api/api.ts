@@ -1,5 +1,9 @@
 import { apiClient } from './client'
 import type {
+    ApiKey,
+    ApiKeyCreated,
+    ApiKeyInput,
+    ApiKeyScope,
     Info,
     Job,
     JobRun,
@@ -127,4 +131,23 @@ export async function updateJobSchedule(
 
 export async function deleteJobSchedule(jobName: string, id: string): Promise<void> {
     await apiClient.delete(`${schedulesPath(jobName)}/${encodeURIComponent(id)}`)
+}
+
+// The signed-in user's API keys. A 404 means the server offers no keys (its
+// auth method is not "proxy").
+export async function listApiKeys(): Promise<ApiKey[]> {
+    return (await apiClient.get<{ items: ApiKey[] }>('/api-keys')).data.items
+}
+
+export async function createApiKey(input: ApiKeyInput): Promise<ApiKeyCreated> {
+    return (await apiClient.post<ApiKeyCreated>('/api-keys', input)).data
+}
+
+export async function revokeApiKey(id: string): Promise<void> {
+    await apiClient.delete(`/api-keys/${encodeURIComponent(id)}`)
+}
+
+// Every area a key can be granted; a 404 means the server offers no keys.
+export async function listApiKeyScopes(): Promise<ApiKeyScope[]> {
+    return (await apiClient.get<{ items: ApiKeyScope[] }>('/api-keys/scopes')).data.items
 }

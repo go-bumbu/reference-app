@@ -20,6 +20,7 @@ import (
 	"github.com/go-bumbu/reference-app/internal/jobs"
 	"github.com/go-bumbu/reference-app/internal/notes"
 	"github.com/go-bumbu/reference-app/internal/tenants"
+	"github.com/go-bumbu/userauth/service/pat"
 	"github.com/spf13/cobra"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -139,6 +140,8 @@ type modules struct {
 	tenants *tenants.Service
 	notes   *notes.Service
 	jobs    *jobs.Service
+	// apiKeys is nil unless the auth method offers API keys (proxy).
+	apiKeys *pat.Service
 }
 
 // newModules instantiates the business modules on db; each migrates its own
@@ -163,7 +166,11 @@ func newModules(cfg AppCfg, db *gorm.DB, l *slog.Logger) (modules, error) {
 	if err != nil {
 		return modules{}, fmt.Errorf("init jobs: %w", err)
 	}
-	return modules{tenants: tenantsSvc, notes: notesSvc, jobs: jobsSvc}, nil
+	apiKeys, err := newAPIKeys(cfg, db, tenantsSvc, l)
+	if err != nil {
+		return modules{}, err
+	}
+	return modules{tenants: tenantsSvc, notes: notesSvc, jobs: jobsSvc, apiKeys: apiKeys}, nil
 }
 
 // newMainHandler wires the modules, the auth method and the web UI into the
@@ -193,7 +200,7 @@ func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, err
 			return nil, fmt.Errorf("init request metrics: %w", err)
 		}
 	}
-	h, err := router.New(router.Cfg{
+	rcfg := router.Cfg{
 		Logger:     l,
 		Notes:      mods.notes,
 		Tags:       mods.notes,
@@ -205,7 +212,14 @@ func newMainHandler(cfg AppCfg, mods modules, l *slog.Logger) (http.Handler, err
 		Metrics:    reqMetrics,
 		// TrustedProxies: the reverse proxies whose X-Forwarded-For the request log trusts.
 		TrustedProxies: proxies,
-	})
+	}
+	// a nil *pat.Service must stay a nil interface, or the router would see keys on
+	if mods.apiKeys != nil {
+		rcfg.APIKeys, rcfg.KeyOwners = mods.apiKeys, mods.tenants
+		l.Info("API keys enabled on "+router.KeyMountPrefix+": let the proxy pass that path without a login",
+			slog.String("component", "auth"))
+	}
+	h, err := router.New(rcfg)
 	if err != nil {
 		return nil, fmt.Errorf("unable to initialize main app handler: %w", err)
 	}

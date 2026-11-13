@@ -47,6 +47,9 @@ func (e *ValidationError) Error() string {
 	return fmt.Sprintf("invalid %s: %s", e.Field, e.Msg)
 }
 
+// ErrUserNotFound means no user has the given ID.
+var ErrUserNotFound = errors.New("tenants: user not found")
+
 // Principal is a resolved caller: the IDs other modules scope their data by,
 // plus the human-readable values they were resolved from.
 type Principal struct {
@@ -107,6 +110,24 @@ func (s *Service) Provision(ctx context.Context, tenantSlug, subject string) (Pr
 		return Principal{}, err
 	}
 	return Principal{TenantID: tenantID, TenantSlug: tenantSlug, UserID: userID, Subject: subject}, nil
+}
+
+// PrincipalByUserID returns the Principal of an existing user, found by its ID,
+// or ErrUserNotFound. It never creates anything: it resolves the owner of a
+// credential the app issued itself (an API key), whose identity no
+// authenticator asserted on this request.
+func (s *Service) PrincipalByUserID(ctx context.Context, userID string) (Principal, error) {
+	if userID == "" {
+		return Principal{}, ErrUserNotFound
+	}
+	p, found, err := s.store.principalByUserID(ctx, userID)
+	if err != nil {
+		return Principal{}, err
+	}
+	if !found {
+		return Principal{}, ErrUserNotFound
+	}
+	return p, nil
 }
 
 func validate(tenantSlug, subject string) error {

@@ -1,17 +1,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { useApiKeysEnabled } from '@/composables/useApi'
 
 // The settings sidebar, after codex's (GitHub-style): every page of the
 // settings as a link, the open one marked. It works its state out from the
-// route, so it takes no props.
+// route, so it takes no props. The API keys page is listed only when the
+// server offers keys.
 const route = useRoute()
+const apiKeysEnabled = useApiKeysEnabled()
 
-const PAGES = [
+const ALL_PAGES = [
     { name: 'settings-appearance', label: 'Appearance', icon: 'pi pi-palette' },
     { name: 'settings-jobs', label: 'Jobs', icon: 'pi pi-history' },
+    { name: 'settings-api-keys', label: 'API keys', icon: 'pi pi-key' },
     { name: 'settings-about', label: 'About', icon: 'pi pi-info-circle' }
 ] as const
+
+const PAGES = computed(() =>
+    ALL_PAGES.filter((p) => p.name !== 'settings-api-keys' || apiKeysEnabled.value === true)
+)
 
 const open = computed(() => route.name)
 </script>

@@ -13,6 +13,9 @@ export interface Me {
     subject: string
     tenantId: string
     tenant: string
+    // The API key of the request; never set for the web UI, which signs in
+    // through the proxy.
+    apiKey?: { id: string; name: string; scopes: string[] }
 }
 
 export interface Note {
@@ -104,4 +107,37 @@ export interface JobRun {
     endedAt?: string
     // Present only while the run is running.
     progress?: JobProgress
+}
+
+// An API key of the signed-in user. scopes are "<area>:read" or
+// "<area>:write"; usable is false for a key whose scopes the server no longer
+// knows (it opens nothing, and only revoking it is left).
+export interface ApiKey {
+    id: string
+    name: string
+    scopes: string[]
+    usable: boolean
+    createdAt: string
+    lastUsedAt: string | null
+    expiresAt: string | null
+}
+
+// A key just created: the only time the server shows its token.
+export interface ApiKeyCreated extends ApiKey {
+    token: string
+}
+
+// The body of a new key; no expiresAt means one year from now.
+export interface ApiKeyInput {
+    name: string
+    scopes: string[]
+    expiresAt?: string
+}
+
+export type ApiKeyLevel = 'read' | 'write'
+
+// An area a key can be granted, and its levels.
+export interface ApiKeyScope {
+    area: string
+    levels: ApiKeyLevel[]
 }

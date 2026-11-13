@@ -39,7 +39,8 @@ Jobs:
 
 # "none": every request is user "admin" of tenant "default" (demo only).
 # "proxy": the reverse proxy asserts the identity in headers; it must strip
-# those headers from client requests.
+# those headers from client requests. API keys (Settings → API keys) are sent
+# to /api/key/v0: let the proxy pass ^/api/key/ without a login, and only that.
 Auth:
   Method: "none"
   ProxyHeader:

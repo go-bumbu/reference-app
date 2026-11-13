@@ -42,6 +42,10 @@ DB:
 #   proxy: a trusted reverse proxy (Authelia, oauth2-proxy, ...) asserts the
 #          identity in headers. The app must be reachable only through the
 #          proxy, and the proxy must strip these headers from client requests.
+#          It also offers API keys (Settings → API keys): clients send them as
+#          "Authorization: Bearer <key>" to /api/key/v0, so let the proxy pass
+#          ^/api/key/ without a login (and only that path; e.g. an Authelia
+#          "bypass" rule listed first). The app ignores identity headers there.
 #   oidc:  not implemented yet; the server refuses to start with it
 Auth:
   Method: "none"

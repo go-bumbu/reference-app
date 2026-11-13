@@ -37,22 +37,25 @@ coverage, lint, the license check, the spec lint and the UI tests, but not the b
 ## Run locally
 
 ```sh
-make run            # start the service with zarf/config.yaml, adding demo data on the first run
-make run-ui         # build the web UI, then start the service with it embedded
+make run            # start the service (auth proxy mode) with zarf/config.yaml, adding demo data on the first run
+make ui-dev         # the web UI with hot reload, playing the auth proxy for `make run`
+make run-ui         # build the web UI, then start the service with it embedded (auth none)
 make clean          # delete dist/ and the local database, demo data included
 ```
 
 The sample config listens on <http://localhost:8081>, with the observability server (`/metrics`, `/health`,
-`/ready`) on `localhost:9090`. It uses SQLite under `zarf/appData/` and `Auth.Method: none`, so every request is
-user `admin` of tenant `default`.
+`/ready`) on `localhost:9090`. It uses SQLite under `zarf/appData/`. `make run` starts it in `Auth.Method: proxy`
+(API keys on), for the Vite dev server to sign you in; `make run-ui` (or `make run RUN_AUTH=none`) uses `none`, so
+every request is user `admin` of tenant `default` without a proxy.
 
 On a fresh database, `make run` first runs `refapp seed`, which adds a demo tag tree and a few notes for that user,
 then touches `zarf/appData/sqlite/.demo-data` so later runs skip it. `make clean` deletes the whole
 `zarf/appData/sqlite/` directory, so the next `make run` starts over with fresh demo data.
 
 For UI work with hot reload, run `make run` in one terminal and `make ui-dev` in another (run `make ui-prepare`
-once first); the Vite dev server proxies `/api` to the backend. See [docs/agents/web-ui.md](docs/agents/web-ui.md) for
-playing the auth proxy from the dev server.
+once first), then open the Vite URL. The dev server proxies `/api` to the backend and plays its auth proxy: it signs
+every request in as `admin` of `default` (the demo data's user); `DEV_USER=alice DEV_TENANT=acme make ui-dev` picks
+another identity. See [docs/agents/web-ui.md](docs/agents/web-ui.md).
 
 ## Build
 

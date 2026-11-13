@@ -75,13 +75,18 @@ cover-report: ## generate a coverage report
 RUN_DATA_DIR := zarf/appData/sqlite
 DEMO_DATA_MARKER := $(RUN_DATA_DIR)/.demo-data
 
-run: ## start the GO service, adding demo data on the first run
+# Auth method of `make run`. "proxy" by default: `make ui-dev` plays the auth proxy and signs you in as the user of the
+# demo data, and API keys are on. RUN_AUTH=none opens :8081 to anyone as that user, with no proxy in front.
+RUN_AUTH ?= proxy
+
+run: ## start the GO service in auth proxy mode for `make ui-dev` (RUN_AUTH=none: no proxy), adding demo data on the first run
 	@if [ ! -f $(DEMO_DATA_MARKER) ]; then \
 		go run main.go seed -c zarf/config.yaml && touch $(DEMO_DATA_MARKER); \
 	fi
-	@REFAPP_ENV_LOGLEVEL="debug" go run main.go start -c zarf/config.yaml
+	@REFAPP_AUTH_METHOD=$(RUN_AUTH) REFAPP_ENV_LOGLEVEL="debug" go run main.go start -c zarf/config.yaml
 
-run-ui: package-ui run ## build the web UI, then start the GO service with it embedded
+run-ui: package-ui ## build the web UI, then start the GO service with it embedded, open on :8081 (auth none)
+	@$(MAKE) --no-print-directory run RUN_AUTH=none
 
 #==========================================================================================
 ##@ Web UI
@@ -89,7 +94,7 @@ run-ui: package-ui run ## build the web UI, then start the GO service with it em
 ui-prepare: ## install the web UI dependencies
 	@cd webui && npm ci
 
-ui-dev: ## run the web UI dev server with hot reload, proxying /api to `make run`
+ui-dev: ## run the web UI dev server with hot reload, playing the auth proxy of `make run` (DEV_USER, DEV_TENANT)
 	@cd webui && npm run dev
 
 package-ui: ## build the web UI and copy it into app/spa/files/ui for embedding

@@ -2,6 +2,10 @@ import { computed, type MaybeRefOrGetter, toValue } from 'vue'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/vue-query'
 import {
     addNoteTag,
+    createApiKey,
+    listApiKeys,
+    listApiKeyScopes,
+    revokeApiKey,
     cancelJobRun,
     createJobSchedule,
     createNote,
@@ -24,6 +28,7 @@ import {
     updateTag
 } from '@/lib/api/api'
 import type {
+    ApiKeyInput,
     JobScheduleInput,
     JobSchedulePatch,
     Note,
@@ -32,6 +37,7 @@ import type {
     TagPatch
 } from '@/lib/api/types'
 import { hasActiveRuns } from '@/lib/jobs'
+import { apiErrorStatus } from '@/lib/apiError'
 
 // How often the runs are refetched while one is active, and a run's open log.
 const JOB_RUNS_POLL_MS = 1000
@@ -52,7 +58,10 @@ export const queryKeys = {
     // 'runs', and each run's log under the run.
     jobs: ['jobs'] as const,
     jobRuns: ['jobs', 'runs'] as const,
-    jobRunLog: (id: string) => ['jobs', 'runs', id, 'log'] as const
+    jobRunLog: (id: string) => ['jobs', 'runs', id, 'log'] as const,
+    // The keys of the signed-in user, and the scopes a key can be granted.
+    apiKeys: ['api-keys'] as const,
+    apiKeyScopes: ['api-keys', 'scopes'] as const
 }
 
 export function useInfo() {
@@ -242,5 +251,51 @@ export function useDeleteJobSchedule() {
     return useMutation({
         mutationFn: ({ job, id }: { job: string; id: string }) => deleteJobSchedule(job, id),
         onSuccess: () => schedulesChanged(qc)
+    })
+}
+
+// The scopes a key can be granted. It doubles as the "are API keys on?" probe:
+// the server answers 404 when its auth method offers no keys, which is an
+// answer, not a failure to retry.
+export function useApiKeyScopes() {
+    return useQuery({
+        queryKey: queryKeys.apiKeyScopes,
+        queryFn: listApiKeyScopes,
+        staleTime: Infinity,
+        retry: false
+    })
+}
+
+// Whether the server offers API keys: undefined while unknown.
+export function useApiKeysEnabled() {
+    const scopes = useApiKeyScopes()
+    return computed<boolean | undefined>(() => {
+        if (scopes.isSuccess.value) return true
+        if (scopes.isError.value) return apiErrorStatus(scopes.error.value) !== 404
+        return undefined
+    })
+}
+
+export function useApiKeys(enabled: MaybeRefOrGetter<boolean> = true) {
+    return useQuery({
+        queryKey: queryKeys.apiKeys,
+        queryFn: listApiKeys,
+        enabled: computed(() => toValue(enabled))
+    })
+}
+
+export function useCreateApiKey() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: (input: ApiKeyInput) => createApiKey(input),
+        onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.apiKeys, exact: true })
+    })
+}
+
+export function useRevokeApiKey() {
+    const qc = useQueryClient()
+    return useMutation({
+        mutationFn: (id: string) => revokeApiKey(id),
+        onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.apiKeys, exact: true })
     })
 }

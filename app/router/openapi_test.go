@@ -23,6 +23,7 @@ import (
 	"github.com/go-bumbu/reference-app/internal/jobs"
 	"github.com/go-bumbu/reference-app/internal/notes"
 	"github.com/go-bumbu/reference-app/internal/tenants"
+	"github.com/go-bumbu/reference-app/libs/keyscope"
 	"github.com/gorilla/mux"
 )
 
@@ -125,6 +126,9 @@ func newTestRouter(t *testing.T, d testDeps, production bool, auth AuthCfg) http
 	return h
 }
 
+// TestOpenAPICoversAllRoutes holds the session mount to the spec, both ways, and
+// the key-only mount to the session mount: the two serve the same operations.
+// It builds the router with API keys on, so the key routes are mounted too.
 func TestOpenAPICoversAllRoutes(t *testing.T) {
 	doc := loadSpec(t)
 
@@ -135,36 +139,103 @@ func TestOpenAPICoversAllRoutes(t *testing.T) {
 		}
 	}
 
-	// walk the routes themselves: New returns them wrapped in the middleware
-	d := newDeps(t)
-	routes, err := newRoutes(Cfg{Logger: slog.New(slog.DiscardHandler), Notes: d.notes, Tags: d.notes, Jobs: d.jobs, Tenants: d.tenants})
-	if err != nil {
-		t.Fatal(err)
+	session, keyed := mountedRoutes(t)
+	if missing := diff(session, documented); len(missing) > 0 {
+		t.Errorf("routes mounted but not documented in the spec: %v", missing)
 	}
-	mounted := map[string]bool{}
-	err = routes.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
+	if missing := diff(documented, session); len(missing) > 0 {
+		t.Errorf("operations documented in the spec but not mounted: %v", missing)
+	}
+	if missing := diff(session, keyed); len(missing) > 0 {
+		t.Errorf("routes missing on the key-only mount: %v", missing)
+	}
+	if missing := diff(keyed, session); len(missing) > 0 {
+		t.Errorf("routes only on the key-only mount: %v", missing)
+	}
+}
+
+// mountedRoutes walks the routes of a router with API keys on and returns the
+// "METHOD /path" of each mount, mount-relative.
+func mountedRoutes(t *testing.T) (session, keyed map[string]bool) {
+	t.Helper()
+	routes, _ := newKeyRoutes(t)
+	session, keyed = map[string]bool{}, map[string]bool{}
+	err := routes.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		tpl, err := route.GetPathTemplate()
-		if err != nil || !strings.HasPrefix(tpl, apiV0MountPrefix+"/") {
-			return nil //nolint:nilerr // routes without a template (or outside the API) are not part of the contract
+		if err != nil {
+			return nil //nolint:nilerr // routes without a template are not part of the contract
 		}
 		methods, err := route.GetMethods()
 		if err != nil {
-			return nil //nolint:nilerr // the mount-prefix subrouter has no methods
+			return nil //nolint:nilerr // a route without methods is not an operation
 		}
-		for _, m := range methods {
-			mounted[m+" "+strings.TrimPrefix(tpl, apiV0MountPrefix)] = true
+		for prefix, set := range map[string]map[string]bool{apiV0MountPrefix: session, keyMountPrefix: keyed} {
+			if rel, ok := strings.CutPrefix(tpl, prefix+"/"); ok {
+				for _, m := range methods {
+					set[m+" /"+rel] = true
+				}
+			}
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	return session, keyed
+}
 
-	if missing := diff(mounted, documented); len(missing) > 0 {
-		t.Errorf("routes mounted but not documented in the spec: %v", missing)
+// newKeyRoutes is newRoutes in proxy mode with API keys on: the bare routes
+// (New returns them wrapped in the middleware) and their key rules.
+func newKeyRoutes(t *testing.T) (*mux.Router, map[string]keyscope.Rule) {
+	t.Helper()
+	d := newDeps(t)
+	routes, rules, err := newRoutes(Cfg{
+		Logger: slog.New(slog.DiscardHandler), Notes: d.notes, Tags: d.notes, Jobs: d.jobs, Tenants: d.tenants,
+		Auth: keyProxyCfg, APIKeys: newKeyService(t, d), KeyOwners: d.tenants,
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if missing := diff(documented, mounted); len(missing) > 0 {
-		t.Errorf("operations documented in the spec but not mounted: %v", missing)
+	return routes, rules
+}
+
+// TestOpenAPIKeyScopes holds each route's API key rule to its operation in the
+// spec: an operation open to keys lists apiKey in its security and the scope
+// in x-api-key-scope; a closed one lists neither.
+func TestOpenAPIKeyScopes(t *testing.T) {
+	doc := loadSpec(t)
+	_, rules := newKeyRoutes(t)
+	for path, item := range doc.Paths.Map() {
+		for method, op := range item.Operations() {
+			key := method + " " + path
+			rule, protected := rules[key]
+			acceptsKey := false
+			if op.Security != nil {
+				for _, req := range *op.Security {
+					if _, ok := req["apiKey"]; ok {
+						acceptsKey = true
+					}
+				}
+			}
+			scope, _ := op.Extensions["x-api-key-scope"].(string)
+			switch {
+			case !protected:
+				if acceptsKey || scope != "" {
+					t.Errorf("%s: public, but the spec gives it an API key scope", key)
+				}
+			case rule.IsClosed():
+				if acceptsKey || scope != "" {
+					t.Errorf("%s: closed to API keys, but the spec opens it", key)
+				}
+			default:
+				if !acceptsKey {
+					t.Errorf("%s: open to API keys, but its security does not list apiKey", key)
+				}
+				if want := rule.Scope(method); scope != want {
+					t.Errorf("%s: x-api-key-scope is %q, the route declares %q", key, scope, want)
+				}
+			}
+		}
 	}
 }
 

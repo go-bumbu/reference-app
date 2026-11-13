@@ -69,23 +69,27 @@ In the prototype, all users of a tenant share its data. Per-user ownership (`Cre
 nothing. If your app needs roles or private data, decide that in the module's API and put the check in the module,
 using `Actor.UserID`. It never goes in the handler.
 
-## Machine clients: API keys *(codex, aether)*
+## Machine clients: API keys *(codex, aether, reference-app)*
 
 A browser extension, a script or a third-party client cannot pass a proxy login. Let users issue **API keys**,
 without bringing passwords into the app. A key is a personal access token from `go-bumbu/userauth`'s `service/pat`,
 owned by a provisioned user. The app stores only its hash.
 
-- **Read the key only when the proxy sent no identity.** The proxy's identity always wins, and `Authorization` is not
-  read then. Under `none`, keys are off.
+- **Serve keys on a key-only mount** (reference-app: the same routes again under `/api/key/v0`; aether: `/rest`).
+  There only the key authenticates and identity headers are never read; the session mount never reads
+  `Authorization`. Under `none`, keys are off. (codex instead reads the key on the session paths when the proxy sent
+  no identity; that needs the proxy to skip its login on those paths for Bearer requests, which most proxies cannot
+  express, so prefer a separate mount.)
 - **A key's tenant comes from its owner's user row, never from the key or a header.** A key request never
   provisions a tenant or a user.
-- **Scope keys narrowly**: codex scopes a key to one sub-partition and a read or write level per app
-  (`space:<id>`, `<app>:read`), in a module that only encodes and decodes scopes (`internal/apikeys`). A scope the
-  app no longer knows (a renamed app) fails closed.
-- **Routes are closed to keys unless a policy lists them.** Keep that list in one file (codex:
-  `app/router/keypolicy.go`) and mark the same operations in the spec with `security: [{}, {apiKey: []}]`. Add a test
-  that fails when the list names a route the router does not serve. Settings and key management are never open to a
-  key.
+- **Scope keys narrowly**: a read or write level per area (reference-app: `<area>:read`, from `libs/keyscope`;
+  codex adds one sub-partition, `space:<id>`, in `internal/apikeys`). A scope the app no longer knows (a renamed
+  area) fails closed.
+- **Routes are closed to keys unless they say otherwise.** reference-app declares each route's rule on its
+  registration line (`keyscope.Closed()` is the zero value), and the grantable areas are the ones declared; codex
+  keeps one allowlist file (`app/router/keypolicy.go`). Either way, mark the open operations in the spec
+  (`security: [{}, {apiKey: []}]`, reference-app adds `x-api-key-scope`) and add a test that fails when the rules and
+  the spec disagree. Settings and key management are never open to a key.
 - **Every bad key gets the same `401`** (malformed, unknown, revoked, expired, owner gone), so a caller learns
   nothing about which part was wrong. A key used on a route it may not use is a `403` that says what the key cannot
   do. A resource outside the key's scope is a `404`, the same as another tenant's.

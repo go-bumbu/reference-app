@@ -235,3 +235,64 @@ func anonymous(t *testing.T, url string) *client.Client {
 	}
 	return c
 }
+
+// TestClientAPIKeysAgainstRouter runs the client's API key operations, and a
+// client authenticated with a key, against the real router.
+func TestClientAPIKeysAgainstRouter(t *testing.T) {
+	d := newDeps(t)
+	srv := httptest.NewServer(newKeyRouter(t, d, newKeyService(t, d), false))
+	t.Cleanup(srv.Close)
+	ctx := context.Background()
+
+	alice, err := client.New(srv.URL, client.WithHeader(userHeader, "alice"), client.WithHeader(tenantHeader, "acme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes, err := alice.APIKeyScopes(ctx)
+	if err != nil || len(scopes) != 1 || scopes[0].Area != scopeNotes {
+		t.Fatalf("scopes: %+v, %v", scopes, err)
+	}
+	created, err := alice.CreateAPIKey(ctx, client.APIKeyInput{Name: "script", Scopes: []string{"notes:read"}})
+	if err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	if _, err := alice.CreateAPIKey(ctx, client.APIKeyInput{Name: "bad", Scopes: []string{"tags:read"}}); !errors.Is(err, client.ErrValidation) {
+		t.Errorf("unknown scope: got %v, want ErrValidation", err)
+	}
+	keys, err := alice.APIKeys(ctx)
+	if err != nil || len(keys) != 1 || keys[0].ID != created.ID || keys[0].ExpiresAt == nil {
+		t.Fatalf("list keys: %+v, %v", keys, err)
+	}
+	if _, err := alice.CreateNote(ctx, client.NoteInput{Title: "for the script"}); err != nil {
+		t.Fatal(err)
+	}
+
+	script, err := client.New(srv.URL, client.WithAPIKey(created.Token))
+	if err != nil {
+		t.Fatal(err)
+	}
+	me, err := script.Me(ctx)
+	if err != nil || me.Subject != "alice" || me.APIKey == nil || me.APIKey.Name != "script" {
+		t.Fatalf("me with key: %+v, %v", me, err)
+	}
+	notes, err := script.ListNotes(ctx, client.ListNotesOptions{})
+	if err != nil || len(notes) != 1 {
+		t.Fatalf("list notes with key: %+v, %v", notes, err)
+	}
+	if _, err := script.CreateNote(ctx, client.NoteInput{Title: "x"}); !errors.Is(err, client.ErrForbidden) {
+		t.Errorf("read-only key creating: got %v, want ErrForbidden", err)
+	}
+	if _, err := script.APIKeys(ctx); !errors.Is(err, client.ErrForbidden) {
+		t.Errorf("key listing keys: got %v, want ErrForbidden", err)
+	}
+
+	if err := alice.RevokeAPIKey(ctx, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := script.Me(ctx); !errors.Is(err, client.ErrUnauthorized) {
+		t.Errorf("revoked key: got %v, want ErrUnauthorized", err)
+	}
+	if err := alice.RevokeAPIKey(ctx, created.ID); !errors.Is(err, client.ErrNotFound) {
+		t.Errorf("revoke twice: got %v, want ErrNotFound", err)
+	}
+}

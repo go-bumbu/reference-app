@@ -7,8 +7,11 @@
 // router to keep both honest).
 //
 // Errors returned by the API are *Problem values (RFC 9457); compare them with
-// errors.Is against ErrNotFound, ErrUnauthorized, ErrValidation, ErrConflict
-// and ErrQueueFull, or use errors.As for the details.
+// errors.Is against ErrNotFound, ErrUnauthorized, ErrForbidden, ErrValidation,
+// ErrConflict and ErrQueueFull, or use errors.As for the details.
+//
+// A client authenticates as the proxy's signed-in user (WithHeader, in
+// development), or with an API key (WithAPIKey).
 package client
 
 import (
@@ -26,8 +29,13 @@ import (
 	"time"
 )
 
-// apiPrefix is the mount point of the API, the spec's `servers` entry.
+// apiPrefix is the mount point of the API, the spec's first `servers` entry:
+// the signed-in user's, behind the auth proxy.
 const apiPrefix = "/api/v0"
+
+// keyMountPrefix is the key-only mount of the same API, the spec's second
+// `servers` entry, used with WithAPIKey.
+const keyMountPrefix = "/api/key/v0"
 
 // maxResponseBytes caps how much of a response body is read.
 const maxResponseBytes = 10 << 20
@@ -35,6 +43,7 @@ const maxResponseBytes = 10 << 20
 // Client calls the API. It is safe for concurrent use.
 type Client struct {
 	base    string // escaped URL of the API mount, without a trailing slash
+	prefix  string // the API mount, apiPrefix or keyMountPrefix
 	http    *http.Client
 	headers http.Header
 }
@@ -54,6 +63,16 @@ func WithHeader(key, value string) Option {
 	return func(c *Client) { c.headers.Add(key, value) }
 }
 
+// WithAPIKey authenticates every request with an API key, on the API's
+// key-only mount (/api/key/v0): the operations the key's scopes open, as the
+// key's owner. A key cannot manage keys.
+func WithAPIKey(key string) Option {
+	return func(c *Client) {
+		c.prefix = keyMountPrefix
+		c.headers.Set("Authorization", "Bearer "+key)
+	}
+}
+
 // New returns a Client for the server at baseURL (scheme and host, optionally
 // a path prefix the server is mounted under), e.g. "http://localhost:8080".
 func New(baseURL string, opts ...Option) (*Client, error) {
@@ -71,13 +90,14 @@ func New(baseURL string, opts ...Option) (*Client, error) {
 		return nil, fmt.Errorf("client: base URL %q must not have a query or fragment", baseURL)
 	}
 	c := &Client{
-		base:    strings.TrimSuffix(u.String(), "/") + apiPrefix,
+		prefix:  apiPrefix,
 		http:    &http.Client{Timeout: 30 * time.Second},
 		headers: http.Header{},
 	}
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.base = strings.TrimSuffix(u.String(), "/") + c.prefix
 	return c, nil
 }
 
@@ -95,6 +115,15 @@ type Me struct {
 	Subject  string `json:"subject"`
 	TenantID string `json:"tenantId"`
 	Tenant   string `json:"tenant"`
+	// APIKey is the key the client authenticates with (WithAPIKey), nil otherwise.
+	APIKey *MeAPIKey `json:"apiKey,omitempty"`
+}
+
+// MeAPIKey is the API key a request was made with.
+type MeAPIKey struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes"`
 }
 
 // Note is a note of the caller's tenant.
@@ -325,6 +354,8 @@ var (
 	ErrNotFound     = errors.New("not found")
 	ErrValidation   = errors.New("validation failed")
 	ErrConflict     = errors.New("conflict")
+	// ErrForbidden is an API key that may not do what was asked (403).
+	ErrForbidden = errors.New("forbidden")
 	// ErrQueueFull is a full job queue (429): try again later.
 	ErrQueueFull = errors.New("job queue full")
 )
@@ -371,6 +402,8 @@ func (p *Problem) Is(target error) bool {
 		return p.Status == http.StatusUnprocessableEntity
 	case ErrConflict:
 		return p.Status == http.StatusConflict
+	case ErrForbidden:
+		return p.Status == http.StatusForbidden
 	case ErrQueueFull:
 		return p.Status == http.StatusTooManyRequests
 	}
