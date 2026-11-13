@@ -213,3 +213,46 @@ func TestCancelledContext(t *testing.T) {
 		}
 	})
 }
+
+func TestPrincipalByUserID(t *testing.T) {
+	forEachDB(t, func(t *testing.T, db *gorm.DB) {
+		ctx := context.Background()
+		svc := newService(t, db)
+		want, err := svc.Provision(ctx, "acme", "alice")
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		if _, err := svc.Provision(ctx, "other", "alice"); err != nil {
+			t.Fatalf("provision other: %v", err)
+		}
+
+		got, err := svc.PrincipalByUserID(ctx, want.UserID)
+		if err != nil {
+			t.Fatalf("PrincipalByUserID: %v", err)
+		}
+		if got != want {
+			t.Errorf("got %+v, want %+v", got, want)
+		}
+
+		for _, id := range []string{"", "0000000000000000", "not-an-id"} {
+			if _, err := svc.PrincipalByUserID(ctx, id); !errors.Is(err, ErrUserNotFound) {
+				t.Errorf("id %q: got %v, want ErrUserNotFound", id, err)
+			}
+		}
+	})
+}
+
+func TestPrincipalByUserIDCancelledContext(t *testing.T) {
+	forEachDB(t, func(t *testing.T, db *gorm.DB) {
+		svc := newService(t, db)
+		p, err := svc.Provision(context.Background(), "acme", "alice")
+		if err != nil {
+			t.Fatalf("provision: %v", err)
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		if _, err := svc.PrincipalByUserID(ctx, p.UserID); err == nil || errors.Is(err, ErrUserNotFound) {
+			t.Errorf("got %v, want a context error", err)
+		}
+	})
+}

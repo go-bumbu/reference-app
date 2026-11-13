@@ -104,6 +104,8 @@ and `todo list --json` cover the common actions — run `todo --help`.
 - [ ] docker build
 - [ ] CI release
 - [ ] go-debs-view
+- [ ] Review alternatives to declaring API key scopes on routes
+  Each route declares its keyscope rule in attachApiV0 for now; weigh a central allowlist (codex keypolicy.go) or deriving rules from the OpenAPI spec (x-api-key-scope).
 
 # next itrataion
 

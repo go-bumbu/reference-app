@@ -62,6 +62,7 @@ describe('Settings', () => {
     })
 
     it('marks the open page in the sidebar', async () => {
+        vi.mocked(api.listApiKeyScopes).mockResolvedValue([])
         const w = await mountWithApp(SettingsSidebar)
         await w.vm.$router.push('/settings/jobs')
         await flushPromises()

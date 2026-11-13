@@ -27,6 +27,11 @@ export async function mountWithApp(component: Component, props: Record<string, u
                 component: { template: '<div />' }
             },
             { path: '/settings/jobs', name: 'settings-jobs', component: { template: '<div />' } },
+            {
+                path: '/settings/api-keys',
+                name: 'settings-api-keys',
+                component: { template: '<div />' }
+            },
             { path: '/settings/about', name: 'settings-about', component: { template: '<div />' } }
         ]
     })

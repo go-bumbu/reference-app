@@ -90,8 +90,9 @@ unless the app has a reason to differ.
 
 - `make ui-prepare` once. Then run `make run` (the backend on `:8081`) and `make ui-dev` (Vite with hot reload). The
   dev server proxies `/api` to `BACKEND_URL`.
-- To test `proxy` auth without a real proxy, the dev server injects the identity headers:
-  `DEV_USER=alice DEV_TENANT=acme npm run dev`. Keep the header names in `vite.config.ts` in step with your config.
+- To test `proxy` auth without a real proxy, the dev server injects the identity headers (reference-app: by default,
+  and `make run` starts the backend in `proxy` mode): `DEV_USER=alice DEV_TENANT=acme npm run dev`. Keep the header
+  names in `vite.config.ts` in step with your config, and pass a key-only path (`/api/key`) through without them.
 
 ## For each new API operation
 

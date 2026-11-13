@@ -5,7 +5,7 @@ rules:
     description: "A paths key must not hard-code the /api base — that belongs in servers:, so a handler can be remounted under a different prefix without rewriting its paths keys."
     severity: error
     given: "$.paths"
-    then: { field: "@key", function: pattern, functionOptions: { notMatch: "^/api" } }
+    then: { field: "@key", function: pattern, functionOptions: { notMatch: "^/api(/|$)" } }
   operation-operationId: error
   operation-tags: error
   operation-tag-defined: error

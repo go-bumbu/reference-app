@@ -30,6 +30,11 @@ const router = createRouter({
                     component: () => import('@/views/settings/JobsView.vue')
                 },
                 {
+                    path: 'api-keys',
+                    name: 'settings-api-keys',
+                    component: () => import('@/views/settings/ApiKeysView.vue')
+                },
+                {
                     path: 'about',
                     name: 'settings-about',
                     component: () => import('@/views/settings/AboutView.vue')

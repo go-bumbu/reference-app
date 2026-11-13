@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-bumbu/http/middleware"
 	"github.com/go-bumbu/reference-app/app/router/handlers"
+	"github.com/go-bumbu/reference-app/libs/keyscope"
 	"github.com/gorilla/mux"
 )
 
@@ -35,6 +36,12 @@ type Cfg struct {
 	Tenants TenantProvisioner
 	// Auth selects the authentication method; the zero value is AuthNone.
 	Auth AuthCfg
+	// APIKeys turns API keys on: the /api-keys routes and the key-only mount
+	// (/api/key/v0). Nil turns them off. Only AuthProxy offers keys.
+	APIKeys APIKeys
+	// KeyOwners resolves the owner of an API key (internal/tenants); required
+	// with APIKeys.
+	KeyOwners KeyOwners
 	// UI serves the web UI (app/spa) for every GET outside the API; nil serves
 	// no UI.
 	UI http.Handler
@@ -62,7 +69,7 @@ func New(cfg Cfg) (http.Handler, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	r, err := newRoutes(cfg)
+	r, _, err := newRoutes(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -80,40 +87,56 @@ func New(cfg Cfg) (http.Handler, error) {
 }
 
 // newRoutes validates the dependencies and mounts every route on a gorilla/mux
-// router. cfg.Logger must be set (New defaults it).
-func newRoutes(cfg Cfg) (*mux.Router, error) {
+// router. It also returns the API key rule of each protected route, by
+// "METHOD /path". cfg.Logger must be set (New defaults it).
+func newRoutes(cfg Cfg) (*mux.Router, map[string]keyscope.Rule, error) {
 	logger := cfg.Logger
 	if cfg.Notes == nil {
-		return nil, errors.New("router: Notes is required")
+		return nil, nil, errors.New("router: Notes is required")
 	}
 	if cfg.Tags == nil {
-		return nil, errors.New("router: Tags is required")
+		return nil, nil, errors.New("router: Tags is required")
 	}
 	if cfg.Jobs == nil {
-		return nil, errors.New("router: Jobs is required")
+		return nil, nil, errors.New("router: Jobs is required")
 	}
 	if cfg.Tenants == nil {
-		return nil, errors.New("router: Tenants is required")
+		return nil, nil, errors.New("router: Tenants is required")
 	}
 	problems, err := newProblems(cfg.Production, logger)
 	if err != nil {
-		return nil, fmt.Errorf("router: problem writer: %w", err)
+		return nil, nil, fmt.Errorf("router: problem writer: %w", err)
 	}
 	guard, err := newAuthGuard(cfg.Auth, cfg.Tenants, problems, logger)
 	if err != nil {
-		return nil, fmt.Errorf("router: auth: %w", err)
+		return nil, nil, fmt.Errorf("router: auth: %w", err)
 	}
 
 	r := mux.NewRouter()
 	r.Use(reportRoute)
-	attachApiV0(r, cfg.Notes, cfg.Tags, cfg.Jobs, guard, problems, logger)
+	m := apiMount{r: r, guard: guard, scopes: keyscope.NewRegistry(), rules: map[string]keyscope.Rule{}}
+	var apiKeys handlers.APIKeysService
+	if cfg.APIKeys != nil {
+		if cfg.Auth.Method != AuthProxy {
+			return nil, nil, errors.New("router: API keys require auth method \"proxy\"")
+		}
+		if cfg.KeyOwners == nil {
+			return nil, nil, errors.New("router: KeyOwners is required with APIKeys")
+		}
+		m.keys = &keyGuard{keys: cfg.APIKeys, owners: cfg.KeyOwners, scopes: m.scopes, problems: problems, logger: logger}
+		apiKeys = cfg.APIKeys
+	}
+	attachApiV0(m, cfg.Notes, cfg.Tags, cfg.Jobs, apiKeys, problems, logger)
+	if err := m.scopes.Err(); err != nil {
+		return nil, nil, fmt.Errorf("router: API key rules: %w", err)
+	}
 	if cfg.UI != nil {
 		attachUI(r, cfg.UI)
 	}
 
 	r.NotFoundHandler = notFound(problems)
 	r.MethodNotAllowedHandler = methodNotAllowed(problems)
-	return r, nil
+	return r, m.rules, nil
 }
 
 // reportRoute hands gorilla's matched path template (e.g. "/api/v0/notes/{noteId}")

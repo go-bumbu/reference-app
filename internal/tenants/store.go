@@ -89,6 +89,21 @@ func (s *store) ensureUser(ctx context.Context, tenantID, subject string, genID 
 	return row.ID, nil
 }
 
+// principalByUserID loads the user with the id and its tenant.
+func (s *store) principalByUserID(ctx context.Context, userID string) (Principal, bool, error) {
+	var u userRow
+	found, err := s.take(ctx, &u, "id = ?", userID)
+	if err != nil || !found {
+		return Principal{}, false, wrap("select user", err)
+	}
+	var t tenantRow
+	found, err = s.take(ctx, &t, "id = ?", u.TenantID)
+	if err != nil || !found {
+		return Principal{}, false, wrap("select tenant", err)
+	}
+	return Principal{TenantID: t.ID, TenantSlug: t.Slug, UserID: u.ID, Subject: u.Subject}, true, nil
+}
+
 // take loads the single row matching the condition into dst; found is false
 // when there is none.
 func (s *store) take(ctx context.Context, dst any, query string, args ...any) (found bool, err error) {

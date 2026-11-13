@@ -29,7 +29,7 @@ Start here, then read the topic doc for the area you change:
                  │
                internal/notes   internal/tenants   internal/jobs   business modules
                  │
-               libs/client                                     foundation
+               libs/client   libs/keyscope                     foundation
                (external: go-bumbu/db/gormdb, go-bumbu/http (middleware, problemjson, spa), go-bumbu/config, go-bumbu/tempo, ...)
 
 Dependencies only point down: `app/` → `internal/` → `libs/`. `.go-deps-view.config` lays the graph out along these
@@ -86,6 +86,11 @@ All settled at bootstrap (2026-11-09, commit `650c99c`) unless dated otherwise.
   port, because the web UI drives it. This departs from
   [../reference/background-jobs.md](../reference/background-jobs.md) on purpose: the engine is not a bare holder
   of tempo types, since the tenant filter must sit between tempo and every caller.
+- **API keys live on their own mount** (2026-11-13): `/api/key/v0` serves the same routes for keys, so the proxy
+  bypasses its login on that path alone and neither mount reads the other's credential; each route declares its key
+  rule where it is registered, and the scope model is the agnostic `libs/keyscope` —
+  [auth-and-tenancy.md](auth-and-tenancy.md). Per-route declarations replace codex's central allowlist; reviewing
+  that choice is in `TODO.md`.
 - **Placeholders a copy must rename** are marked `// TODO replace` (`appName`, `EnvVarPrefix`, `problemBaseURI`).
 
 ## Known debt

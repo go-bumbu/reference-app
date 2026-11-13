@@ -28,6 +28,15 @@ See [architecture.md](architecture.md) for the tiers, [auth-and-tenancy.md](auth
 | `GET /api/v0/job-runs/{runId}` | protected | one run; another tenant's is `404` |
 | `POST /api/v0/job-runs/{runId}/cancel` | protected | cancel a waiting run or stop a running one; `204`, also for a run that already ended |
 | `GET /api/v0/job-runs/{runId}/log` | protected | `text/plain`, the last `?tail=` lines (1–1000, default 1000) |
+| `GET` / `POST /api/v0/api-keys` | protected, `proxy` mode only | the caller's API keys; create one (`201`, token shown once; `422` bad name / scopes / expiry, `409` past the limit) |
+| `GET /api/v0/api-keys/scopes` | protected, `proxy` mode only | the areas a key can be granted, each at `read` / `write` |
+| `DELETE /api/v0/api-keys/{keyId}` | protected, `proxy` mode only | revoke one of the caller's keys; `204`, another user's is `404` |
+
+**The key-only mount `/api/key/v0`** serves the same routes for API keys (`Authorization: Bearer <key>`), in `proxy`
+mode only — [auth-and-tenancy.md](auth-and-tenancy.md). It is the spec's second `servers` entry; an operation open to
+keys lists `apiKey` in its `security` and its scope in `x-api-key-scope`, and every protected operation documents the
+`403` a key gets where it may not go. Today `/me` (any key) and the notes routes (`notes:read` / `notes:write`) are
+open; tags, jobs and `/api-keys` are closed.
 
 Jobs, their runs and their schedules are scoped to the caller's tenant like notes (`internal/jobs` filters tempo's
 data by the tenant in each run's params). Run and schedule ids are tempo's UUID strings, the one exception to the
@@ -58,8 +67,9 @@ not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsP
 - **Routes are registered with their full path on the root router, not on a `PathPrefix` subrouter.** With
   gorilla/mux a later subrouter match clears an earlier "method mismatch", turning `405` into `404`. For the same
   reason the UI catch-all puts its not-the-API matcher first (`attachUI`).
-- **Routes are public unless wrapped in `guard.protect`.** Protect each route explicitly, so the public ones stay
-  visible at a glance.
+- **Routes are public unless mounted with `protected`**, which wraps them in `guard.protect` (and in the key guard on
+  the key-only mount). Protect each route explicitly, so the public ones stay visible at a glance.
+- **Both mounts serve the same routes.** `TestOpenAPICoversAllRoutes` also fails when a route is on one mount only.
 - **Handlers hold no business logic.** They decode, call the module, map the result. Wire structs
   (`noteResponse`, `noteRequest`, ...) are mapped explicitly from module types, never the module types themselves.
 - **Every error is RFC 9457 problem+json** (`go-bumbu/http/problemjson`), including unknown API paths (`404`) and
@@ -78,6 +88,9 @@ not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsP
 |---|---|---|
 | body not one valid JSON object, unknown field, over 1 MiB (`decodeJSON`) | 400 | `bad_request` |
 | guard: no / untrusted identity, or a `tenants.ValidationError` | 401 | `unauthorized` |
+| key guard: any invalid API key (one message for all) | 401 | `unauthorized` |
+| key guard: route closed to keys, or the key lacks its area / level; `/api-keys` with a key | 403 | `forbidden` |
+| `pat.ErrTooManyTokens` (a create past the per-user limit) | 409 | `conflict` |
 | module `ErrNotFound`, `ErrTagNotFound`, a tag id that is not a positive integer | 404 | `not_found` |
 | module `ErrTagExists` (a sibling already has the name) | 409 | `conflict` |
 | module `ErrTooManyTags` (a create past `MaxTagsPerTenant`) | 422 | `validation_error`, no field |
@@ -93,7 +106,10 @@ not a positive int64 names no tag: `404`. A tenant holds at most `notes.MaxTagsP
 1. Edit the spec; run `make spec-lint`.
 2. Add the module method (business rules, typed errors) — [database.md](database.md).
 3. Add the handler in `app/router/handlers/<area>.go`: extend the consumer-side interface, map wire structs.
-4. Mount it in `attachApiV0`, wrapped in `guard.protect` unless it is public.
+4. Mount it in `attachApiV0` with `m.protected(method, path, rule, handler)`, or `m.public` for a public one. `rule`
+   is what an API key needs: `keyscope.Closed()` unless the route is meant for scripts, else `keyscope.Area("<area>")`
+   (a new area becomes grantable by being declared). Mirror it in the spec (`security`, `x-api-key-scope`, `403`);
+   `TestOpenAPIKeyScopes` fails when they disagree.
 5. Add a case to the contract test in `app/router/openapi_test.go` for every documented status you can trigger.
 6. Add the method to `libs/client` and cover it in `app/router/client_test.go` (runs the client against the real
    router).
@@ -108,11 +124,11 @@ body is validated against its schema.
 ## Go client (`libs/client`)
 
 Hand-written against the spec, stdlib only, shares no types with the server. API failures come back as
-`*client.Problem`, matching `client.ErrNotFound`, `ErrUnauthorized`, `ErrValidation`, `ErrConflict` and
-`ErrQueueFull` with `errors.Is`. `RunJob` reports a `200` (a run already in flight) as `reused`.
-`WithHeader` lets development code play the trusted proxy.
+`*client.Problem`, matching `client.ErrNotFound`, `ErrUnauthorized`, `ErrForbidden`, `ErrValidation`, `ErrConflict`
+and `ErrQueueFull` with `errors.Is`. `RunJob` reports a `200` (a run already in flight) as `reused`.
+`WithHeader` lets development code play the trusted proxy; `WithAPIKey` sends a key to `/api/key/v0` instead.
 
 ## Versioning
 
 `v0` makes no stability promise. A breaking `v1` is a new spec file, a new `attachApiV1` with its own mount prefix
-and its own contract tests; `isAPIPath` must then cover both prefixes.
+and its own contract tests (and its own key-only mount); `isAPIPath` must then cover every prefix.

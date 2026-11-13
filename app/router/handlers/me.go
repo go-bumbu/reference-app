@@ -18,6 +18,15 @@ type meResponse struct {
 	Subject    string `json:"subject"`
 	TenantID   string `json:"tenantId"`
 	TenantSlug string `json:"tenant"`
+	// APIKey is the key the request was made with, on the key-only mount only.
+	APIKey *meKeyResponse `json:"apiKey,omitempty"`
+}
+
+// meKeyResponse is the API key of a /me request (schema MeApiKey).
+type meKeyResponse struct {
+	ID     string   `json:"id"`
+	Name   string   `json:"name"`
+	Scopes []string `json:"scopes"`
 }
 
 // MeHandler handles GET /me: who the authenticated caller is.
@@ -28,8 +37,12 @@ func MeHandler(problems *problemjson.Writer) http.Handler {
 			problems.Write(w, r, http.StatusInternalServerError, problemjson.SlugInternal, "unexpected error")
 			return
 		}
-		writeJSON(w, http.StatusOK, meResponse{
+		resp := meResponse{
 			UserID: id.UserID, Subject: id.Subject, TenantID: id.TenantID, TenantSlug: id.TenantSlug,
-		})
+		}
+		if k, keyed := reqctx.KeyFrom(r.Context()); keyed {
+			resp.APIKey = &meKeyResponse{ID: k.ID, Name: k.Name, Scopes: k.Grant.Scopes()}
+		}
+		writeJSON(w, http.StatusOK, resp)
 	})
 }
