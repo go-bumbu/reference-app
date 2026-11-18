@@ -28,7 +28,8 @@ See [architecture.md](architecture.md) for the tiers the layers follow.
 
 ## CI vs local (known debt)
 
-CI (`.github/workflows/go.yml`, `webui.yml`) runs on every PR and push to `main`: `make test` + `make coverage`, the
+CI (`.github/workflows/go.yml`, `webui.yml`) runs on every PR, and only on PRs (a merge to `main` is
+not re-checked; it already passed as a PR): `make test` + `make coverage`, the
 golangci-lint action, `make license-check`, `make spec-lint`, and `make ui-test` + `make package-ui`. It does not run
 `make verify` or the benchmarks, and it never runs Postgres. `verify` runs the suite twice (`test`, then
 `coverage` per package). The planned fixes are in `TODO.md` → "Fix the verify process"; follow them rather than

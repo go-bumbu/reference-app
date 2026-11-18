@@ -22,7 +22,7 @@ point into that app. Copy the pattern when your app has the need, not before.
 | [api.md](api.md) | contract-first endpoints, handlers, problem+json, contract tests, Go client | modules-and-database |
 | [auth-and-tenancy.md](auth-and-tenancy.md) | delegated auth, tenants and users, tenant isolation | api, modules-and-database |
 | [web-ui.md](web-ui.md) | Vue SPA, its API layer, embedding it in the binary | api |
-| [build-and-release.md](build-and-release.md) | verify gates, CI, goreleaser, deb, container image | everything above |
+| [build-and-release.md](build-and-release.md) | verify gates, CI and release process, goreleaser, deb, container image | everything above |
 
 ## Starting a new app from a copy
 

@@ -34,3 +34,6 @@ zarf/appData/sqlite
 zarf/appData/job-logs
 data/
 !zarf/appData/session/.gitkeep
+
+# todo CLI write lock
+/.todo.json.lock

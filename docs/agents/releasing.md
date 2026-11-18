@@ -6,8 +6,8 @@ the gates a change must pass first are in [testing.md](testing.md).
     make tag version="v1.2.3"   # on main with a clean tree; (re)creates and pushes the tag
 
 - `make tag` refuses unless you are on `main`, the tree has no unstaged changes, and the version looks like
-  `v1.2.3` (optionally `-rc.1`). It **does not run `make verify`**: a release is cut from a `main` that already passed
-  the `go` and `webui` workflows. It deletes and re-pushes an existing tag of the same name — never re-tag a version
+  `v1.2.3` (optionally `-rc.1`). It **does not run `make verify`**: a release is cut from a `main` built from PRs that
+  already passed the `go` and `webui` workflows (those run on PRs only, not on `main` or tags). It deletes and re-pushes an existing tag of the same name — never re-tag a version
   that has been published.
 - `check-git-clean` uses `git diff --quiet`: untracked files do not block a tag (debt, in `TODO.md`).
 - Never tag or push on your own; releasing is the maintainer's call.

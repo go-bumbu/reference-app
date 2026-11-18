@@ -1,12 +1,10 @@
 # Go checks: tests + coverage, golangci-lint, the license check and the OpenAPI
 # spec lint. One job each, so they run in parallel and fail independently; each
-# shows up on a PR as `go / <job>`. `make tag` does not run these — a release is
-# cut from a main that already passed them.
+# shows up on a PR as `go / <job>`. PRs only: main is reached by merging a PR
+# that already passed them, so neither a merge nor `make tag` reruns them.
 name: go
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
