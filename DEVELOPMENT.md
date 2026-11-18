@@ -30,7 +30,7 @@ make verify         # the full check: tests, license check, lint, benchmarks, co
 ```
 
 Run `make verify` before opening a PR. It runs every check and fails at the end if any failed, so one run
-reports all of them. CI runs the `go` and `webui` workflows on every PR and push to `main`. They run tests,
+reports all of them. CI runs the `go` and `webui` workflows on every PR, and only on PRs. They run tests,
 coverage, lint, the license check, the spec lint and the UI tests, but not the benchmarks or Postgres. See
 [docs/agents/testing.md](docs/agents/testing.md).
 
@@ -74,6 +74,6 @@ Releases are built in CI by goreleaser, triggered by pushing a `v*.*.*` tag:
 make tag version="v1.2.3"   # on main with a clean tree; (re)creates and pushes the tag
 ```
 
-`make tag` does **not** run `make verify`; the `go` and `webui` workflows gate every push to `main` and every PR.
+`make tag` does **not** run `make verify`; `main` only receives merged PRs, which the `go` and `webui` workflows already gated.
 On the tag, `.github/workflows/release.yml` builds the zips, debs and container image with goreleaser. What each
 artifact contains, and the traps, are in [docs/agents/releasing.md](docs/agents/releasing.md).

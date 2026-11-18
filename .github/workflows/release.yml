@@ -68,6 +68,10 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # release the tag that triggered the run: when a final tag shares a
+          # commit with an rc tag (v1.0.0 / v1.0.0-rc1), goreleaser would
+          # otherwise pick the rc and collide with its existing release
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
 
   # ===========================================================================
   # macOS (runs on macOS, appends to the existing release)
@@ -108,3 +112,5 @@ jobs:
           args: release --clean --config .goreleaser-darwin.yaml
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # same tag as the linux job, so macOS appends to the right release
+          GORELEASER_CURRENT_TAG: ${{ github.ref_name }}

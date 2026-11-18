@@ -1,4 +1,4 @@
-# Build and release — verify gates, CI, goreleaser, deb, container image
+# Build and release — verify gates, CI and release process, goreleaser, deb, container image
 
 How a new app checks its quality and ships. Copy the `Makefile`, `.golangci.yaml`, `.spectral.yaml`,
 `zarf/allowedLicenses.json`, `.github/workflows/{go,webui,release}.yml`, both `.goreleaser*.yaml` files and
@@ -26,12 +26,35 @@ How a new app checks its quality and ships. Copy the `Makefile`, `.golangci.yaml
 - Known gaps you inherit: `verify` runs tests twice, and `check-git-clean` ignores untracked files. The
   reference-app `TODO.md` → "Fix the verify process" lists the fixes. Apply them in your copy if you can.
 
-## CI (`.github/workflows/`)
+## CI and release process
 
-- `go.yml` (PRs and pushes to `main`): test + coverage, golangci-lint (version pinned), license check, spec lint,
-  each as its own job, so they fail independently.
-- `webui.yml`: `npm ci`, `make ui-test`, `make package-ui`.
-- `release.yml`: runs on `v*.*.*` tags.
+The path from a change to a published release:
+
+1. **Open a PR.** The `go` and `webui` workflows run on it. Run `make verify` locally first: it runs the same checks
+   plus the benchmarks.
+2. **Merge.** Squash-merge once every check is green. `main` gets no CI run of its own. It only receives merged
+   PRs, so a green PR stands in for a green `main`.
+3. **Tag.** `make tag version="vX.Y.Z"` on an up-to-date `main` creates and pushes an annotated tag.
+4. **Release.** The tag starts `release.yml`, which builds and publishes with goreleaser. It runs no tests,
+   because the PRs that built this `main` already did.
+
+Every check runs once, on the PR. That only holds while nothing reaches `main` without a PR, so set this up on the
+repo when you copy it:
+
+- **Protect `main`**: no direct pushes, and require the `go / test`, `go / lint`, `go / license-check`,
+  `go / spec-lint` and `webui / test` checks before merging.
+- **Require the branch to be up to date before merging**, or use a merge queue. Otherwise two PRs that each pass
+  can break `main` together, and nothing notices until the next PR runs.
+- Keep `make tag`'s guards. It refuses off `main`, with unstaged changes, or with a version outside `vX.Y.Z[-pre]`,
+  because `release.yml` only fires on `v*.*.*` tags. It does not run `verify` itself.
+
+### CI (`.github/workflows/`)
+
+- `go.yml` (PRs only): test + coverage, golangci-lint (version pinned), license check, spec lint, each as its own
+  job, so they fail independently.
+- `webui.yml` (PRs only): `npm ci`, `make ui-test`, `make package-ui`. Building the UI here catches a broken
+  production build before a tag does.
+- `release.yml`: runs on `v*.*.*` tags only.
 - Better than the reference: have CI call the same make targets as local `verify`, so they cannot drift.
 - When the repo grows a second component (a desktop app, a website), give each its own workflow. A check then
   reads `<component> / <job>` on a PR. *(aether: `server.yml`, `webui.yml`, `player.yml`)*
@@ -39,14 +62,18 @@ How a new app checks its quality and ships. Copy the `Makefile`, `.golangci.yaml
   `GITHUB_TOKEN`, and events caused by that token start no workflows, so `on: release` never fires. *(aether: the
   GitHub Pages `site` job)*
 
-## Release (`make tag version="vX.Y.Z"` → `release.yml` → goreleaser)
+### Release (`make tag` → `release.yml` → goreleaser)
 
-- `make tag` requires `main`, no unstaged changes and a `vX.Y.Z[-pre]` version. It relies on `main` having passed CI
-  and does not run `verify` itself.
+- Linux and windows build on Ubuntu (`.goreleaser.yaml`) and create the GitHub release. macOS builds on a macOS
+  runner (`.goreleaser-darwin.yaml`, `needs: linux`) and appends to the same release.
 - Both release jobs run `make package-ui` **before** goreleaser. The embedded UI is whatever is in
   `app/spa/files/ui` at build time.
-- Linux and windows build on Ubuntu (`.goreleaser.yaml`), macOS on a macOS runner (`.goreleaser-darwin.yaml`),
-  which appends to the same GitHub release.
+- **Both jobs set `GORELEASER_CURRENT_TAG: ${{ github.ref_name }}`.** When a final tag shares a commit with an rc
+  tag (`v1.0.0` and `v1.0.0-rc.1`), goreleaser would otherwise pick the rc and collide with its existing release.
+- A prerelease (`-rc.1`) publishes like any release, but the image gets only its exact version tag, never
+  `MAJOR.MINOR` or `latest`.
+- `make tag` deletes and re-pushes an existing tag of the same name. Use that to retry a failed release, and
+  never to re-tag a published version.
 
 Keep these build decisions:
 

@@ -1,11 +1,10 @@
 # Web UI (webui/) checks: type-check + unit tests, then the production build
 # the server embeds, so a build break is caught before a release. Shows up on a
-# PR as `webui / test`.
+# PR as `webui / test`. PRs only: main is reached by merging a PR that already
+# passed it, so neither a merge nor a release tag reruns it.
 name: webui
 
 on:
-  push:
-    branches: [main]
   pull_request:
 
 permissions:
