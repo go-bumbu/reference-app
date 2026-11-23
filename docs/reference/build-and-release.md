@@ -13,7 +13,7 @@ How a new app checks its quality and ships. Copy the `Makefile`, `.golangci.yaml
 | `make lint` | golangci-lint v2 (pin the same version locally and in CI) |
 | `make spec-lint` | spectral on the OpenAPI spec |
 | `make ui-test` | `vue-tsc` + Vitest |
-| `make verify` | test, license-check, lint, benchmark, coverage, spec-lint, ui-test |
+| `make verify` | test, license-check, lint, coverage, spec-lint, ui-test |
 
 - **Coverage gate: at least 70% per package** across `internal/` and `libs/` (`COVERAGE_THRESHOLD`). `app/` is
   covered by router and process tests but not gated. Raise the threshold over time, and never lower it to get a
@@ -23,15 +23,15 @@ How a new app checks its quality and ships. Copy the `Makefile`, `.golangci.yaml
 - **License check**: `go-licence-detector` checks every module, indirect ones included, against
   `zarf/allowedLicenses.json`. Review the list for your project's license.
 - `verify` runs every target, collects the failures and fails at the end, so one run reports all of them.
-- Known gaps you inherit: `verify` runs tests twice, and `check-git-clean` ignores untracked files. The
+- `make test` writes one cover profile and `make coverage` gates on it, so `verify` runs the suite once.
+- Known gap you inherit: `check-git-clean` ignores untracked files. The
   reference-app `TODO.md` → "Fix the verify process" lists the fixes. Apply them in your copy if you can.
 
 ## CI and release process
 
 The path from a change to a published release:
 
-1. **Open a PR.** The `go` and `webui` workflows run on it. Run `make verify` locally first: it runs the same checks
-   plus the benchmarks.
+1. **Open a PR.** The `go` and `webui` workflows run on it. Run `make verify` locally first: it runs the same checks.
 2. **Merge.** Squash-merge once every check is green. `main` gets no CI run of its own. It only receives merged
    PRs, so a green PR stands in for a green `main`.
 3. **Tag.** `make tag version="vX.Y.Z"` on an up-to-date `main` creates and pushes an annotated tag.

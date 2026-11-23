@@ -37,3 +37,6 @@ data/
 
 # todo CLI write lock
 /.todo.json.lock
+
+# cover profile of `make test`, read by `make coverage`
+coverage.out

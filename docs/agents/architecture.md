@@ -96,7 +96,6 @@ All settled at bootstrap (2026-11-09, commit `650c99c`) unless dated otherwise.
 ## Known debt
 
 - Layer rules are documented and visualized, not enforced: depguard (or go-arch-lint) is planned in `TODO.md`.
-- `make verify` runs the test suite twice (test + coverage) and skips `spec-lint`; CI does not call `make verify`
-  — details and the planned fixes in [testing.md](testing.md).
+- CI does not call `make verify` — details and the planned fixes in [testing.md](testing.md).
 - Schema changes rely on GORM `AutoMigrate` only; there are no versioned migrations — [database.md](database.md).
 - `/health` and `/ready` always answer `OK` — [server-lifecycle.md](server-lifecycle.md).

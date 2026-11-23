@@ -59,7 +59,6 @@ already catalogued with a direction in `TODO.md`. Layering and decisions: [archi
 
 ## Not implemented (catalogued in TODO.md)
 
-`TODO.md` → "Verify and code quality" holds the chosen direction for: running the suite once in `verify`, a
-formatting gate, pinning tool versions in one place, CI calling the same make targets, `go-test-coverage` instead of
-the awk parser, `check-git-clean` catching untracked files, `govulncheck`, `-race -shuffle=on`, extra linters, and
-workflow / secret / spelling checks. Implement from there; do not redesign them.
+`TODO.md` → "Verify and code quality" holds the chosen direction for: a formatting gate, pinning
+tool versions in one place, CI calling the same make targets, `go-test-coverage` instead of the awk parser,
+`check-git-clean` catching untracked files, `govulncheck`, `-race -shuffle=on`, extra linters, and workflow / secret / spelling checks. Implement from there; do not redesign them.
