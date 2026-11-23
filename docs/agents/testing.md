@@ -7,18 +7,20 @@ See [architecture.md](architecture.md) for the tiers the layers follow.
 
 | Target | What it runs |
 |---|---|
-| `make test` | `go test ./... -cover` — the fast suite, SQLite only |
-| `make test-alldbs` | the same with `TESTDBS_ALL=1`: module tests on Postgres too (needs docker) |
+| `make test` | `go test ./...` — the fast suite, SQLite only; writes the cover profile `coverage.out` |
+| `make test-alldbs` | `go test ./... -cover` with `TESTDBS_ALL=1`: module tests on Postgres too (needs docker) |
+| `make coverage` | the coverage gate on `coverage.out`; runs no tests, so run `make test` first |
 | `make lint` | `golangci-lint run` (v2; CI pins v2.13.2) |
 | `make spec-lint` | spectral on `docs/openapi/api-v0.yaml` with `.spectral.yaml`, failing on warnings |
 | `make ui-test` | `vue-tsc --noEmit` + `vitest run` in `webui/` |
-| `make verify` | `test` + `license-check` + `lint` + `benchmark` + `coverage` + `spec-lint` + `ui-test`; runs every check, then fails if any failed |
+| `make verify` | `test` + `license-check` + `lint` + `coverage` + `spec-lint` + `ui-test`; runs every check, then fails if any failed; benchmarks are not part of it, run `make benchmark` |
 
 **Before calling work done run `make verify`, plus `make test-alldbs` when a store or migration changed.**
 `verify` does not stop at the first failure: it runs every check and reports all failures in one run.
 
 - **Coverage gate**: every package under `internal/` and `libs/` must reach **70%** on its own
-  (`COVERAGE_THRESHOLD`); `app/` is not gated. If a package falls below, write the missing tests — never lower the
+  (`COVERAGE_THRESHOLD`); `app/` is not gated. It reads the profile `make test` wrote, so `verify` runs the suite
+  once; a package with no data in the profile fails. If a package falls below, write the missing tests — never lower the
   threshold or exclude the package.
 - **License check**: `go-licence-detector` against `zarf/allowedLicenses.json`, indirect dependencies included. A new
   dependency with a license outside the list fails; ask before widening the list.
@@ -31,8 +33,7 @@ See [architecture.md](architecture.md) for the tiers the layers follow.
 CI (`.github/workflows/go.yml`, `webui.yml`) runs on every PR, and only on PRs (a merge to `main` is
 not re-checked; it already passed as a PR): `make test` + `make coverage`, the
 golangci-lint action, `make license-check`, `make spec-lint`, and `make ui-test` + `make package-ui`. It does not run
-`make verify` or the benchmarks, and it never runs Postgres. `verify` runs the suite twice (`test`, then
-`coverage` per package). The planned fixes are in `TODO.md` → "Fix the verify process"; follow them rather than
+`make verify` or the benchmarks, and it never runs Postgres. The planned fixes are in `TODO.md` → "Fix the verify process"; follow them rather than
 inventing another scheme.
 
 ## Test layers

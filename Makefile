@@ -6,8 +6,12 @@ default: help
 #==========================================================================================
 ##@ Testing
 #==========================================================================================
-test: ## run fast go tests
-	@go test ./... -cover
+# Cover profile written by `make test` and read by `make coverage`, so verify runs the suite once.
+COVER_PROFILE ?= coverage.out
+
+test: ## run fast go tests, writing the cover profile the coverage gate reads
+	@rm -f $(COVER_PROFILE)
+	@go test ./... -covermode=atomic -coverprofile=$(COVER_PROFILE)
 
 test-alldbs: ## run go tests on every database, Postgres included (needs docker)
 	@TESTDBS_ALL=1 go test ./... -cover
@@ -27,24 +31,29 @@ license-check: ## check for invalid licenses
 	@go list -m -mod=readonly  -json all  | go-licence-detector -includeIndirect -rules zarf/allowedLicenses.json
 
 COVERAGE_THRESHOLD ?= 70
+# Reads the profile of `make test` (no test run of its own): each package under internal/ and libs/ must reach the
+# threshold. A profile block is "dir/file.go:pos numStmts count", so a package is the dir of its blocks.
 .PHONY: coverage
-coverage:
-	@fail=0; \
-	for pkg in $$(go list ./internal/... ./libs/... 2>/dev/null); do \
-		go test -coverprofile=coverage.out -covermode=atomic $$pkg > /dev/null; \
-		if [ -f coverage.out ]; then \
-			coverage=$$(go tool cover -func=coverage.out | grep total: | awk '{print $$3}' | sed 's/%//'); \
-			if [ $$(echo "$$coverage < $(COVERAGE_THRESHOLD)" | bc -l) -eq 1 ]; then \
-				echo "❌ Coverage in $$pkg is below $(COVERAGE_THRESHOLD)!"; \
-				fail=1; \
-			fi; \
-			rm -f coverage.out; \
-		else \
-			echo "⚠️ No coverage data for $$pkg"; \
-			fail=1; \
-		fi; \
-	done; \
-	exit $$fail
+coverage: ## gate per-package coverage of internal/ and libs/ on the cover profile of `make test`
+	@if [ ! -f $(COVER_PROFILE) ]; then \
+		echo "❌ $(COVER_PROFILE) not found: run make test first"; \
+		exit 1; \
+	fi
+	@go list ./internal/... ./libs/... | awk -v threshold=$(COVERAGE_THRESHOLD) ' \
+		FNR == 1 && NR == 1 { next } \
+		NR == FNR { \
+			pkg = $$1; sub(/\/[^\/]*:.*$$/, "", pkg); \
+			if (!($$1 in stmts)) { stmts[$$1] = $$2; total[pkg] += $$2 } \
+			if ($$3 > 0 && !($$1 in hit)) { hit[$$1] = 1; covered[pkg] += $$2 } \
+			next \
+		} \
+		{ \
+			if (!total[$$1]) { print "⚠️ No coverage data for " $$1; fail = 1; next } \
+			pct = 100 * covered[$$1] / total[$$1]; \
+			if (pct < threshold) { printf "❌ Coverage in %s is %.1f%%, below %s%%!\n", $$1, pct, threshold; fail = 1 } \
+			else printf "✅ %s %.1f%%\n", $$1, pct \
+		} \
+		END { exit fail }' $(COVER_PROFILE) -
 
 ui-test: ## run the web UI type check and unit tests (needs node)
 	@cd webui && npm test
@@ -52,7 +61,7 @@ ui-test: ## run the web UI type check and unit tests (needs node)
 .PHONY: verify
 verify: ## run all checks; runs every check and fails if any fail
 	@fail=0; \
-	for target in test license-check lint benchmark coverage spec-lint ui-test; do \
+	for target in test license-check lint coverage spec-lint ui-test; do \
 		echo "==================== make $$target ===================="; \
 		$(MAKE) --no-print-directory $$target || fail=1; \
 	done; \

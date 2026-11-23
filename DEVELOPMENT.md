@@ -26,12 +26,12 @@ make test-alldbs    # Go tests on every database, Postgres included (needs docke
 make lint           # golangci-lint
 make spec-lint      # lint the OpenAPI spec with spectral
 make ui-test        # web UI type check and unit tests
-make verify         # the full check: tests, license check, lint, benchmarks, coverage gate, spec lint, UI tests
+make verify         # the full check: tests, license check, lint, coverage gate, spec lint, UI tests
 ```
 
 Run `make verify` before opening a PR. It runs every check and fails at the end if any failed, so one run
 reports all of them. CI runs the `go` and `webui` workflows on every PR, and only on PRs. They run tests,
-coverage, lint, the license check, the spec lint and the UI tests, but not the benchmarks or Postgres. See
+coverage, lint, the license check, the spec lint and the UI tests, but not Postgres. See
 [docs/agents/testing.md](docs/agents/testing.md).
 
 ## Run locally

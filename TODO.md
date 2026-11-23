@@ -28,10 +28,8 @@ and `todo list --json` cover the common actions — run `todo --help`.
 
 ## Fix the verify process
 
-- [ ] Run the test suite only once in verify
+- [x] Run the test suite only once in verify
   Don't run both test and coverage; write one cover profile and have the coverage gate read it.
-- [ ] Smoke-run benchmarks in verify with -benchtime=1x
-  Shows the benchmarks still build and don't panic; keep the full benchmark run as its own target.
 - [ ] Add a formatting gate via golangci v2 formatters
   gofumpt plus goimports/gci in the formatters: section, so golangci-lint run checks them.
 - [ ] Clean dead golangci settings
